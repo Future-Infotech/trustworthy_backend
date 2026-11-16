@@ -1,0 +1,1367 @@
+// Trustworthy AI-Driven Digital Transformation Platform
+// PostgreSQL schema covering all platform modules (phases 1-10).
+//
+// Conventions
+//  - UUID primary keys (`@db.Uuid`)
+//  - snake_case table names via @@map
+//  - createdAt / updatedAt on mutable entities; createdById / updatedById are
+//    audit columns (users are never hard-deleted, so the ids remain resolvable)
+//  - Ownership / authorship relations are real foreign keys
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum RoleName {
+  SUPER_ADMIN
+  ADMIN
+  FACULTY
+  STUDENT
+  DEVELOPER
+  PRODUCT_DEVELOPER
+  EXECUTIVE
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+  PENDING_DELETION
+  DELETED
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum LessonType {
+  TEXT
+  VIDEO
+  IMAGE
+  CODE
+  KNOWLEDGE_CHECK
+  EXERCISE
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  DROPPED
+}
+
+enum ProgressStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum LabType {
+  XAI
+  FAIRNESS
+  ROBUSTNESS
+  MODEL_CARD
+  RISK_ASSESSMENT
+  GOVERNANCE
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  COMPLETED
+  FAILED
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  GRADED
+  RETURNED
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  MULTIPLE_ANSWER
+  TRUE_FALSE
+  SCENARIO
+}
+
+enum CertificateStatus {
+  PENDING_APPROVAL
+  ISSUED
+  REVOKED
+}
+
+enum DatasetStatus {
+  UPLOADED
+  PROCESSING
+  READY
+  INVALID
+  DELETED
+}
+
+enum ColumnDataType {
+  NUMERIC
+  CATEGORICAL
+  BOOLEAN
+  DATETIME
+  TEXT
+}
+
+enum ModelLifecycleStage {
+  DEVELOPMENT
+  TESTING
+  REVIEW
+  APPROVED
+  PRODUCTION
+  SUSPENDED
+  RETIRED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+/// Outcome of a technical evaluation (fairness, robustness, explainability).
+enum EvaluationStatus {
+  NOT_ASSESSED
+  PASSED
+  WARNING
+  FAILED
+}
+
+enum ExperimentType {
+  DATASET_ANALYSIS
+  TRAINING
+  SHAP
+  LIME
+  COUNTERFACTUAL
+  GRAD_CAM
+  FAIRNESS_AUDIT
+  FAIRNESS_MITIGATION
+  FGSM
+  PGD
+  ADVERSARIAL_TRAINING
+}
+
+enum ExperimentStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ModelCardStatus {
+  DRAFT
+  IN_REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+
+/// Shared review workflow for risk assessments, AIAs and vendor assessments.
+enum ReviewStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  REJECTED
+  RETIRED
+}
+
+enum PolicyStatus {
+  DRAFT
+  UNDER_REVIEW
+  ACTIVE
+  RETIRED
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  INVESTIGATING
+  MITIGATED
+  RESOLVED
+  CLOSED
+}
+
+enum AISystemStatus {
+  PROPOSED
+  DEVELOPMENT
+  ACTIVE
+  SUSPENDED
+  RETIRED
+}
+
+enum RiskEntryStatus {
+  OPEN
+  MITIGATING
+  ACCEPTED
+  CLOSED
+}
+
+/// Deliberately contains no "COMPLIANT" value: the platform never asserts
+/// regulatory compliance; human/legal review is always the final step.
+enum ComplianceStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  EVIDENCE_PROVIDED
+  NEEDS_LEGAL_REVIEW
+  REVIEWED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum OversightDecision {
+  ACCEPTED_RECOMMENDATION
+  OVERRODE_RECOMMENDATION
+  ESCALATED
+  DEFERRED
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+  DENIED
+}
+
+enum AuditSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationType {
+  ASSIGNMENT_ASSIGNED
+  ASSIGNMENT_GRADED
+  COURSE_COMPLETED
+  LAB_COMPLETED
+  CERTIFICATE_ISSUED
+  RISK_ASSESSMENT_SUBMITTED
+  GOVERNANCE_REVIEW_REQUIRED
+  HIGH_RISK_MODEL_DETECTED
+  MODEL_REVIEW_DUE
+  SYSTEM
+}
+
+enum DeletionRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Identity, access control & sessions
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Role {
+  id          String           @id @default(uuid()) @db.Uuid
+  name        RoleName         @unique
+  displayName String
+  description String?
+  isSystem    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String           @id @default(uuid()) @db.Uuid
+  key         String           @unique
+  resource    String
+  action      String
+  description String?
+  createdAt   DateTime         @default(now())
+  roles       RolePermission[]
+
+  @@index([resource])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String     @db.Uuid
+  permissionId String     @db.Uuid
+  createdAt    DateTime   @default(now())
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model User {
+  id                  String     @id @default(uuid()) @db.Uuid
+  email               String     @unique
+  passwordHash        String
+  firstName           String
+  lastName            String
+  roleId              String     @db.Uuid
+  status              UserStatus @default(ACTIVE)
+  organization        String?
+  jobTitle            String?
+  lastLoginAt         DateTime?
+  failedLoginAttempts Int        @default(0)
+  lockedUntil         DateTime?
+  passwordChangedAt   DateTime?
+  deletedAt           DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  createdById         String?    @db.Uuid
+  updatedById         String?    @db.Uuid
+
+  role              Role                          @relation(fields: [roleId], references: [id])
+  refreshTokens     RefreshToken[]
+  consents          ConsentRecord[]
+  deletionRequests  DataDeletionRequest[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  coursesInstructed Course[]                      @relation("CourseInstructor")
+  enrollments       Enrollment[]
+  progress          Progress[]
+  labAttempts       LabAttempt[]
+  submissions       Submission[]                  @relation("SubmissionAuthor")
+  gradedSubmissions Submission[]                  @relation("SubmissionGrader")
+  quizAttempts      QuizAttempt[]
+  certificates      Certificate[]
+  datasets          Dataset[]
+  models            AIModel[]
+  experiments       Experiment[]
+  modelCards        ModelCard[]
+  riskAssessments   RiskAssessment[]
+  impactAssessments AlgorithmicImpactAssessment[]
+  aiSystems         AISystem[]
+  policies          GovernancePolicy[]
+  incidentsReported AIIncident[]                  @relation("IncidentReporter")
+  incidentsAssigned AIIncident[]                  @relation("IncidentAssignee")
+
+  @@index([roleId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model RefreshToken {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @db.Uuid
+  /// SHA-256 of the opaque token; the raw token is never stored.
+  tokenHash         String    @unique
+  /// All tokens produced by rotation from one login share a family id, so that
+  /// reuse of a rotated token revokes the entire family.
+  familyId          String    @db.Uuid
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  revokedReason     String?
+  replacedByTokenId String?   @db.Uuid
+  createdByIp       String?
+  userAgent         String?
+  createdAt         DateTime  @default(now())
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model ConsentRecord {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  consentType   String
+  granted       Boolean
+  policyVersion String
+  ipAddress     String?
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, consentType])
+  @@map("consent_records")
+}
+
+model DataDeletionRequest {
+  id            String                @id @default(uuid()) @db.Uuid
+  userId        String                @db.Uuid
+  status        DeletionRequestStatus @default(PENDING)
+  reason        String?
+  notes         String?
+  requestedAt   DateTime              @default(now())
+  processedAt   DateTime?
+  processedById String?               @db.Uuid
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("data_deletion_requests")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Learning: courses, modules, lessons, progress
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Course {
+  id            String       @id @default(uuid()) @db.Uuid
+  title         String
+  slug          String       @unique
+  summary       String
+  description   String
+  coverImageUrl String?
+  level         String       @default("Intermediate")
+  durationHours Int?
+  status        CourseStatus @default(DRAFT)
+  instructorId  String?      @db.Uuid
+  publishedAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  createdById   String?      @db.Uuid
+  updatedById   String?      @db.Uuid
+
+  instructor   User?         @relation("CourseInstructor", fields: [instructorId], references: [id], onDelete: SetNull)
+  modules      Module[]
+  enrollments  Enrollment[]
+  labs         Lab[]
+  assignments  Assignment[]
+  quizzes      Quiz[]
+  certificates Certificate[]
+
+  @@index([status])
+  @@index([instructorId])
+  @@map("courses")
+}
+
+model Module {
+  id               String   @id @default(uuid()) @db.Uuid
+  courseId         String   @db.Uuid
+  title            String
+  summary          String
+  order            Int
+  objectives       String[]
+  estimatedMinutes Int?
+  isRequired       Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  createdById      String?  @db.Uuid
+  updatedById      String?  @db.Uuid
+
+  course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons     Lesson[]
+  labs        Lab[]
+  quizzes     Quiz[]
+  assignments Assignment[]
+  progress    Progress[]
+
+  @@unique([courseId, order])
+  @@map("modules")
+}
+
+model Lesson {
+  id               String     @id @default(uuid()) @db.Uuid
+  moduleId         String     @db.Uuid
+  title            String
+  type             LessonType @default(TEXT)
+  /// Markdown body.
+  content          String
+  /// [{ type: "image" | "video", url, caption }]
+  media            Json?
+  codeSnippet      String?
+  codeLanguage     String?
+  videoUrl         String?
+  /// Inline knowledge check: [{ prompt, options, correctOptionIds, explanation }]
+  knowledgeCheck   Json?
+  order            Int
+  estimatedMinutes Int?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  createdById      String?    @db.Uuid
+  updatedById      String?    @db.Uuid
+
+  module   Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  progress Progress[]
+
+  @@unique([moduleId, order])
+  @@map("lessons")
+}
+
+model Enrollment {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @db.Uuid
+  courseId        String           @db.Uuid
+  status          EnrollmentStatus @default(ACTIVE)
+  progressPercent Float            @default(0)
+  enrolledAt      DateTime         @default(now())
+  completedAt     DateTime?
+  updatedAt       DateTime         @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@index([courseId, status])
+  @@map("enrollments")
+}
+
+model Progress {
+  id               String         @id @default(uuid()) @db.Uuid
+  userId           String         @db.Uuid
+  lessonId         String         @db.Uuid
+  moduleId         String         @db.Uuid
+  status           ProgressStatus @default(NOT_STARTED)
+  timeSpentSeconds Int            @default(0)
+  lastAccessedAt   DateTime       @default(now())
+  completedAt      DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@index([userId, moduleId])
+  @@map("progress")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Labs, assignments, quizzes, certificates
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Lab {
+  id               String   @id @default(uuid()) @db.Uuid
+  courseId         String?  @db.Uuid
+  moduleId         String?  @db.Uuid
+  slug             String   @unique
+  title            String
+  type             LabType
+  description      String
+  instructions     String
+  /// Default experiment configuration offered to learners.
+  config           Json?
+  isRequired       Boolean  @default(false)
+  estimatedMinutes Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  createdById      String?  @db.Uuid
+  updatedById      String?  @db.Uuid
+
+  course   Course?      @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  module   Module?      @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+  attempts LabAttempt[]
+
+  @@index([type])
+  @@index([moduleId])
+  @@map("labs")
+}
+
+model LabAttempt {
+  id           String        @id @default(uuid()) @db.Uuid
+  labId        String        @db.Uuid
+  userId       String        @db.Uuid
+  experimentId String?       @db.Uuid
+  status       AttemptStatus @default(IN_PROGRESS)
+  score        Float?
+  notes        String?
+  startedAt    DateTime      @default(now())
+  completedAt  DateTime?
+  updatedAt    DateTime      @updatedAt
+
+  lab        Lab         @relation(fields: [labId], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  experiment Experiment? @relation(fields: [experimentId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status])
+  @@index([labId])
+  @@map("lab_attempts")
+}
+
+model Assignment {
+  id           String     @id @default(uuid()) @db.Uuid
+  courseId     String     @db.Uuid
+  moduleId     String?    @db.Uuid
+  title        String
+  description  String
+  instructions String
+  targetRoles  RoleName[]
+  dueDate      DateTime?
+  maxScore     Int        @default(100)
+  /// [{ criterion, weight, description }]
+  rubric       Json?
+  isPublished  Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  createdById  String?    @db.Uuid
+  updatedById  String?    @db.Uuid
+
+  course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  module      Module?      @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+  submissions Submission[]
+
+  @@index([courseId])
+  @@map("assignments")
+}
+
+model Submission {
+  id            String           @id @default(uuid()) @db.Uuid
+  assignmentId  String           @db.Uuid
+  userId        String           @db.Uuid
+  attemptNumber Int              @default(1)
+  content       String
+  /// [{ storageKey, fileName, sizeBytes }]
+  attachments   Json?
+  status        SubmissionStatus @default(SUBMITTED)
+  /// Submitted after the assignment due date.
+  late          Boolean          @default(false)
+  score         Float?
+  /// [{ criterion, maxPoints, points, comment }] recorded by the grader.
+  rubricScores  Json?
+  feedback      String?
+  gradedById    String?          @db.Uuid
+  gradedAt      DateTime?
+  submittedAt   DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  user       User       @relation("SubmissionAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  gradedBy   User?      @relation("SubmissionGrader", fields: [gradedById], references: [id], onDelete: SetNull)
+
+  @@unique([assignmentId, userId, attemptNumber])
+  @@index([userId])
+  @@index([status])
+  @@map("submissions")
+}
+
+model Quiz {
+  id                  String   @id @default(uuid()) @db.Uuid
+  courseId            String?  @db.Uuid
+  moduleId            String?  @db.Uuid
+  title               String
+  description         String?
+  passingScore        Int      @default(70)
+  timeLimitSeconds    Int?
+  attemptLimit        Int?
+  randomizeQuestions  Boolean  @default(true)
+  questionsPerAttempt Int?
+  isFinal             Boolean  @default(false)
+  isPublished         Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  createdById         String?  @db.Uuid
+  updatedById         String?  @db.Uuid
+
+  course    Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  module    Module?       @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+  questions Question[]
+  attempts  QuizAttempt[]
+
+  @@index([courseId])
+  @@index([moduleId])
+  @@map("quizzes")
+}
+
+/// Questions belong to a quiz or to the shared question bank (quizId = null).
+model Question {
+  id               String       @id @default(uuid()) @db.Uuid
+  quizId           String?      @db.Uuid
+  bankCategory     String?
+  type             QuestionType
+  prompt           String
+  scenario         String?
+  /// [{ id, text }]
+  options          Json
+  correctOptionIds String[]
+  explanation      String
+  points           Int          @default(1)
+  difficulty       String       @default("MEDIUM")
+  tags             String[]
+  order            Int          @default(0)
+  isActive         Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  createdById      String?      @db.Uuid
+  updatedById      String?      @db.Uuid
+
+  quiz Quiz? @relation(fields: [quizId], references: [id], onDelete: SetNull)
+
+  @@index([quizId])
+  @@index([bankCategory])
+  @@map("questions")
+}
+
+model QuizAttempt {
+  id            String    @id @default(uuid()) @db.Uuid
+  quizId        String    @db.Uuid
+  userId        String    @db.Uuid
+  attemptNumber Int
+  questionIds   String[]
+  /// { [questionId]: string[] }
+  answers       Json?
+  score         Float?
+  maxScore      Float?
+  percentage    Float?
+  passed        Boolean?
+  startedAt     DateTime  @default(now())
+  expiresAt     DateTime?
+  submittedAt   DateTime?
+
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([quizId, userId, attemptNumber])
+  @@index([userId])
+  @@map("quiz_attempts")
+}
+
+model Certificate {
+  id                String            @id @default(uuid()) @db.Uuid
+  userId            String            @db.Uuid
+  courseId          String            @db.Uuid
+  /// Human-readable public identifier, e.g. TAI-2026-000123
+  certificateNumber String            @unique
+  /// Unguessable token used in the public verification URL.
+  verificationCode  String            @unique
+  status            CertificateStatus @default(PENDING_APPROVAL)
+  completionDate    DateTime?
+  issuedAt          DateTime?
+  approvedById      String?           @db.Uuid
+  revokedAt         DateTime?
+  revokedReason     String?
+  metadata          Json?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@index([status])
+  @@map("certificates")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Datasets, models & experiments
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Dataset {
+  id                   String        @id @default(uuid()) @db.Uuid
+  name                 String
+  description          String?
+  ownerId              String        @db.Uuid
+  fileName             String
+  mimeType             String        @default("text/csv")
+  storageKey           String
+  sizeBytes            Int
+  checksumSha256       String
+  rowCount             Int?
+  columnCount          Int?
+  duplicateRowCount    Int?
+  missingCellCount     Int?
+  status               DatasetStatus @default(UPLOADED)
+  validationErrors     Json?
+  targetColumn         String?
+  sensitiveColumns     String[]
+  /// Aggregate profile (statistics, correlations); never contains raw rows.
+  profile              Json?
+  isSynthetic          Boolean       @default(false)
+  containsPersonalData Boolean       @default(false)
+  /// Shared datasets are visible to every user with datasets:read; private ones to the owner and data managers.
+  isShared             Boolean       @default(false)
+  retentionUntil       DateTime?
+  deletedAt            DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  createdById          String?       @db.Uuid
+  updatedById          String?       @db.Uuid
+
+  owner         User            @relation(fields: [ownerId], references: [id])
+  columns       DatasetColumn[]
+  experiments   Experiment[]
+  models        AIModel[]
+  modelVersions ModelVersion[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@map("datasets")
+}
+
+model DatasetColumn {
+  id           String         @id @default(uuid()) @db.Uuid
+  datasetId    String         @db.Uuid
+  name         String
+  position     Int
+  dataType     ColumnDataType
+  isSensitive  Boolean        @default(false)
+  isTarget     Boolean        @default(false)
+  missingCount Int            @default(0)
+  uniqueCount  Int?
+  /// { min, max, mean, std, topValues, histogram }
+  stats        Json?
+
+  dataset Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@unique([datasetId, name])
+  @@map("dataset_columns")
+}
+
+/// Model registry entry ("Model" in the product vocabulary).
+model AIModel {
+  id                   String              @id @default(uuid()) @db.Uuid
+  name                 String
+  description          String?
+  purpose              String
+  ownerId              String              @db.Uuid
+  aiSystemId           String?             @db.Uuid
+  framework            String
+  algorithm            String
+  trainingDatasetId    String?             @db.Uuid
+  riskLevel            RiskLevel?
+  fairnessStatus       EvaluationStatus    @default(NOT_ASSESSED)
+  securityStatus       EvaluationStatus    @default(NOT_ASSESSED)
+  explainabilityStatus EvaluationStatus    @default(NOT_ASSESSED)
+  lifecycleStage       ModelLifecycleStage @default(DEVELOPMENT)
+  nextReviewAt         DateTime?
+  tags                 String[]
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  createdById          String?             @db.Uuid
+  updatedById          String?             @db.Uuid
+
+  owner            User              @relation(fields: [ownerId], references: [id])
+  aiSystem         AISystem?         @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
+  trainingDataset  Dataset?          @relation(fields: [trainingDatasetId], references: [id], onDelete: SetNull)
+  versions         ModelVersion[]
+  modelCards       ModelCard[]
+  riskAssessments  RiskAssessment[]
+  incidents        AIIncident[]
+  oversightRecords OversightRecord[]
+
+  @@index([ownerId])
+  @@index([lifecycleStage])
+  @@index([riskLevel])
+  @@index([aiSystemId])
+  @@map("ai_models")
+}
+
+model ModelVersion {
+  id                   String   @id @default(uuid()) @db.Uuid
+  modelId              String   @db.Uuid
+  version              String
+  description          String?
+  /// Opaque artifact kept for export/download only; the platform never deserialises model files.
+  artifactKey          String?
+  artifactChecksum     String?
+  artifactFormat       String?
+  artifactSizeBytes    Int?
+  /// Populated only from real evaluation runs.
+  metrics              Json?
+  /// Full model spec (algorithm, hyperparameters, split) used to rebuild the model deterministically.
+  parameters           Json?
+  featureColumns       String[]
+  targetColumn         String?
+  randomSeed           Int?
+  datasetId            String?  @db.Uuid
+  /// Hash of test-set predictions; a rebuild with a different fingerprint is flagged as non-identical.
+  fingerprint          String?
+  trainingExperimentId String?  @db.Uuid
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  createdById          String?  @db.Uuid
+
+  model              AIModel      @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  dataset            Dataset?     @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+  trainingExperiment Experiment?  @relation("TrainingRun", fields: [trainingExperimentId], references: [id], onDelete: SetNull)
+  experiments        Experiment[] @relation("EvaluatedVersion")
+
+  @@unique([modelId, version])
+  @@index([datasetId])
+  @@map("model_versions")
+}
+
+model Experiment {
+  id             String           @id @default(uuid()) @db.Uuid
+  name           String?
+  type           ExperimentType
+  status         ExperimentStatus @default(QUEUED)
+  userId         String           @db.Uuid
+  datasetId      String?          @db.Uuid
+  modelVersionId String?          @db.Uuid
+  algorithm      String?
+  parameters     Json
+  /// Seed + config hash make every run reproducible.
+  randomSeed     Int
+  configHash     String
+  jobId          String?
+  progress       Int              @default(0)
+  logs           Json?
+  error          String?
+  /// Experiments are educational simulations unless explicitly flagged otherwise.
+  isEducational  Boolean          @default(true)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  durationMs     Int?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  user            User               @relation(fields: [userId], references: [id])
+  dataset         Dataset?           @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+  modelVersion    ModelVersion?      @relation("EvaluatedVersion", fields: [modelVersionId], references: [id], onDelete: SetNull)
+  results         ExperimentResult[]
+  labAttempts     LabAttempt[]
+  trainedVersions ModelVersion[]     @relation("TrainingRun")
+
+  @@index([userId, type])
+  @@index([status])
+  @@index([datasetId])
+  @@index([modelVersionId])
+  @@index([createdAt])
+  @@map("experiments")
+}
+
+model ExperimentResult {
+  id           String   @id @default(uuid()) @db.Uuid
+  experimentId String   @db.Uuid
+  /// e.g. "metrics", "shap_global", "lime_local", "fairness_by_group", "fgsm"
+  kind         String
+  metrics      Json?
+  data         Json
+  /// [{ name, storageKey, mimeType }]
+  plots        Json?
+  createdAt    DateTime @default(now())
+
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+
+  @@index([experimentId, kind])
+  @@map("experiment_results")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Model cards, risk & impact assessments
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ModelCard {
+  id            String          @id @default(uuid()) @db.Uuid
+  modelId       String?         @db.Uuid
+  name          String
+  version       String
+  status        ModelCardStatus @default(DRAFT)
+  /// Structured card fields (intended use, metrics, fairness, limitations, ...).
+  content       Json
+  /// Previous version of this card (version lineage).
+  parentCardId  String?         @db.Uuid
+  ownerId       String          @db.Uuid
+  publishedAt   DateTime?
+  publishedById String?         @db.Uuid
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  createdById   String?         @db.Uuid
+  updatedById   String?         @db.Uuid
+
+  model      AIModel?    @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  owner      User        @relation(fields: [ownerId], references: [id])
+  parentCard ModelCard?  @relation("ModelCardVersions", fields: [parentCardId], references: [id], onDelete: SetNull)
+  childCards ModelCard[] @relation("ModelCardVersions")
+
+  @@index([modelId])
+  @@index([status])
+  @@index([ownerId])
+  @@map("model_cards")
+}
+
+model RiskAssessment {
+  id                       String       @id @default(uuid()) @db.Uuid
+  title                    String
+  aiSystemId               String?      @db.Uuid
+  modelId                  String?      @db.Uuid
+  assessorId               String       @db.Uuid
+  /// Raw wizard answers.
+  answers                  Json
+  score                    Int?
+  riskLevel                RiskLevel?
+  riskFactors              Json?
+  recommendedControls      Json?
+  requiredOversight        String?
+  /// "Potential compliance considerations" - never a compliance determination.
+  complianceConsiderations Json?
+  scoringVersion           String
+  status                   ReviewStatus @default(DRAFT)
+  reviewerId               String?      @db.Uuid
+  reviewComment            String?
+  submittedAt              DateTime?
+  reviewedAt               DateTime?
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+  createdById              String?      @db.Uuid
+  updatedById              String?      @db.Uuid
+
+  aiSystem AISystem? @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
+  model    AIModel?  @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  assessor User      @relation(fields: [assessorId], references: [id])
+
+  @@index([status])
+  @@index([riskLevel])
+  @@index([aiSystemId])
+  @@index([modelId])
+  @@map("risk_assessments")
+}
+
+model AlgorithmicImpactAssessment {
+  id           String       @id @default(uuid()) @db.Uuid
+  title        String
+  aiSystemId   String?      @db.Uuid
+  ownerId      String       @db.Uuid
+  version      Int          @default(1)
+  status       ReviewStatus @default(DRAFT)
+  /// Keyed by section: systemInformation, purpose, stakeholders, ...
+  sections     Json
+  submittedAt  DateTime?
+  approvedAt   DateTime?
+  approvedById String?      @db.Uuid
+  retiredAt    DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  createdById  String?      @db.Uuid
+  updatedById  String?      @db.Uuid
+
+  aiSystem AISystem?          @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
+  owner    User               @relation(fields: [ownerId], references: [id])
+  history  AIAStatusHistory[]
+
+  @@index([status])
+  @@index([aiSystemId])
+  @@map("algorithmic_impact_assessments")
+}
+
+model AIAStatusHistory {
+  id           String        @id @default(uuid()) @db.Uuid
+  assessmentId String        @db.Uuid
+  fromStatus   ReviewStatus?
+  toStatus     ReviewStatus
+  actorId      String        @db.Uuid
+  comment      String?
+  /// Full snapshot of the sections at the time of the transition.
+  snapshot     Json?
+  createdAt    DateTime      @default(now())
+
+  assessment AlgorithmicImpactAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId, createdAt])
+  @@map("aia_status_history")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Governance
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AISystem {
+  id             String         @id @default(uuid()) @db.Uuid
+  name           String
+  description    String
+  businessUnit   String?
+  ownerId        String         @db.Uuid
+  status         AISystemStatus @default(PROPOSED)
+  riskLevel      RiskLevel?
+  isThirdParty   Boolean        @default(false)
+  vendorName     String?
+  /// Unsanctioned AI usage discovered in the organisation (Shadow AI register).
+  isShadowAI     Boolean        @default(false)
+  discoveredVia  String?
+  dataCategories String[]
+  lastReviewedAt DateTime?
+  nextReviewAt   DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  createdById    String?        @db.Uuid
+  updatedById    String?        @db.Uuid
+
+  owner             User                          @relation(fields: [ownerId], references: [id])
+  models            AIModel[]
+  riskAssessments   RiskAssessment[]
+  impactAssessments AlgorithmicImpactAssessment[]
+  incidents         AIIncident[]
+  riskRegister      RiskRegisterEntry[]
+  oversightRecords  OversightRecord[]
+  vendorAssessments VendorAssessment[]
+
+  @@index([status])
+  @@index([riskLevel])
+  @@index([isShadowAI])
+  @@map("ai_systems")
+}
+
+model GovernancePolicy {
+  id            String       @id @default(uuid()) @db.Uuid
+  title         String
+  slug          String       @unique
+  category      String
+  summary       String
+  /// Markdown body.
+  content       String
+  version       String       @default("1.0")
+  status        PolicyStatus @default(DRAFT)
+  effectiveDate DateTime?
+  reviewDate    DateTime?
+  ownerId       String       @db.Uuid
+  approvedById  String?      @db.Uuid
+  approvedAt    DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  createdById   String?      @db.Uuid
+  updatedById   String?      @db.Uuid
+
+  owner User @relation(fields: [ownerId], references: [id])
+
+  @@index([status])
+  @@index([category])
+  @@map("governance_policies")
+}
+
+model AIIncident {
+  id                String           @id @default(uuid()) @db.Uuid
+  title             String
+  description       String
+  severity          IncidentSeverity
+  status            IncidentStatus   @default(OPEN)
+  aiSystemId        String?          @db.Uuid
+  modelId           String?          @db.Uuid
+  reportedById      String           @db.Uuid
+  assignedToId      String?          @db.Uuid
+  occurredAt        DateTime?
+  detectedAt        DateTime         @default(now())
+  resolvedAt        DateTime?
+  impact            String?
+  rootCause         String?
+  correctiveActions String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  createdById       String?          @db.Uuid
+  updatedById       String?          @db.Uuid
+
+  aiSystem   AISystem? @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
+  model      AIModel?  @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  reportedBy User      @relation("IncidentReporter", fields: [reportedById], references: [id])
+  assignedTo User?     @relation("IncidentAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([status, severity])
+  @@index([aiSystemId])
+  @@map("ai_incidents")
+}
+
+model RiskRegisterEntry {
+  id            String          @id @default(uuid()) @db.Uuid
+  title         String
+  description   String
+  category      String
+  aiSystemId    String?         @db.Uuid
+  /// 1 (rare) .. 5 (almost certain)
+  likelihood    Int
+  /// 1 (negligible) .. 5 (severe)
+  impact        Int
+  inherentScore Int
+  residualScore Int?
+  mitigation    String?
+  status        RiskEntryStatus @default(OPEN)
+  ownerId       String?         @db.Uuid
+  reviewDate    DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  createdById   String?         @db.Uuid
+  updatedById   String?         @db.Uuid
+
+  aiSystem AISystem? @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([aiSystemId])
+  @@map("risk_register_entries")
+}
+
+model OversightRecord {
+  id                String            @id @default(uuid()) @db.Uuid
+  aiSystemId        String?           @db.Uuid
+  modelId           String?           @db.Uuid
+  decisionReference String
+  decision          OversightDecision
+  rationale         String
+  reviewerId        String            @db.Uuid
+  createdAt         DateTime          @default(now())
+
+  aiSystem AISystem? @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
+  model    AIModel?  @relation(fields: [modelId], references: [id], onDelete: SetNull)
+
+  @@index([aiSystemId])
+  @@index([modelId])
+  @@map("oversight_records")
+}
+
+model VendorAssessment {
+  id             String       @id @default(uuid()) @db.Uuid
+  aiSystemId     String?      @db.Uuid
+  vendorName     String
+  productName    String
+  riskLevel      RiskLevel?
+  /// Questionnaire answers and findings.
+  findings       Json
+  status         ReviewStatus @default(DRAFT)
+  assessorId     String       @db.Uuid
+  assessmentDate DateTime     @default(now())
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  aiSystem AISystem? @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
+
+  @@index([vendorName])
+  @@map("vendor_assessments")
+}
+
+model ComplianceRequirement {
+  id                  String           @id @default(uuid()) @db.Uuid
+  code                String           @unique
+  title               String
+  description         String
+  /// Reference framework, e.g. "NIST AI RMF", "ISO/IEC 42001", "EU AI Act".
+  framework           String
+  category            String
+  status              ComplianceStatus @default(NOT_STARTED)
+  evidence            String?
+  ownerId             String?          @db.Uuid
+  requiresLegalReview Boolean          @default(true)
+  lastReviewedAt      DateTime?
+  nextReviewAt        DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  createdById         String?          @db.Uuid
+  updatedById         String?          @db.Uuid
+
+  @@index([framework])
+  @@index([status])
+  @@map("compliance_requirements")
+}
+
+model ReviewSchedule {
+  id             String    @id @default(uuid()) @db.Uuid
+  resourceType   String
+  resourceId     String    @db.Uuid
+  title          String
+  frequencyDays  Int
+  nextReviewAt   DateTime
+  lastReviewedAt DateTime?
+  assigneeId     String?   @db.Uuid
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([resourceType, resourceId])
+  @@index([nextReviewAt])
+  @@map("review_schedules")
+}
+
+model ApprovalRequest {
+  id            String         @id @default(uuid()) @db.Uuid
+  resourceType  String
+  resourceId    String         @db.Uuid
+  title         String
+  requestedById String         @db.Uuid
+  approverId    String?        @db.Uuid
+  status        ApprovalStatus @default(PENDING)
+  comment       String?
+  decidedAt     DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([resourceType, resourceId])
+  @@index([status])
+  @@map("approval_requests")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Platform: audit, notifications, settings
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Append-only. UPDATE / DELETE / TRUNCATE are rejected by a database trigger
+/// (see migration `audit_log_immutability`).
+model AuditLog {
+  id         String        @id @default(uuid()) @db.Uuid
+  userId     String?       @db.Uuid
+  /// Snapshot of the actor at the time of the event.
+  userEmail  String?
+  role       RoleName?
+  action     String
+  resource   String
+  resourceId String?
+  ipAddress  String?
+  userAgent  String?
+  requestId  String?
+  before     Json?
+  after      Json?
+  result     AuditResult   @default(SUCCESS)
+  reason     String?
+  severity   AuditSeverity @default(INFO)
+  metadata   Json?
+  createdAt  DateTime      @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([action])
+  @@index([resource, resourceId])
+  @@index([severity])
+  @@index([role])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  type      NotificationType
+  title     String
+  message   String
+  link      String?
+  metadata  Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model SystemSetting {
+  key         String   @id
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@map("system_settings")
+}

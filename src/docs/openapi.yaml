@@ -1,0 +1,2133 @@
+openapi: 3.0.3
+info:
+  title: Trustworthy AI-Driven Digital Transformation Platform API
+  version: 1.0.0
+  description: |
+    REST API for the Trustworthy AI platform.
+
+    **Authentication.** Obtain an access token from `POST /auth/login` and send it as
+    `Authorization: Bearer <token>`. Access tokens are short-lived (15 minutes by default).
+    A rotating refresh token is stored in an `HttpOnly`, `SameSite=Strict` cookie scoped to
+    `/api/auth`; call `POST /auth/refresh` with header `X-CSRF-Protection: 1` to obtain a new
+    access token.
+
+    **Errors.** All errors use the envelope `{ "error": { "code", "message", "details?", "requestId" } }`.
+
+    **Permissions.** Each operation names the permission it requires. Roles map to
+    permissions in `backend/src/rbac/permissions.ts`; see `docs/rbac.md`.
+
+    **Compliance.** Reports, model cards, risk assessments and AIAs present *potential
+    compliance considerations* for human and legal review. No endpoint determines that a
+    legal requirement is satisfied.
+
+    Every route mounted under `/api` is documented here; `tests/unit/openapi.test.ts`
+    fails if an endpoint is added without being documented.
+servers:
+  - url: /api
+tags:
+  - name: Health
+  - name: Auth
+  - name: Users
+  - name: Roles
+  - name: Audit Logs
+  - name: Analytics
+  - name: Settings
+  - name: Notifications
+  - name: Courses
+  - name: Quizzes
+  - name: Labs
+  - name: Assignments
+  - name: Certificates
+  - name: Reports
+  - name: Datasets
+  - name: Models
+  - name: Experiments
+  - name: Model Cards
+  - name: Risk Assessments
+  - name: Impact Assessments
+  - name: Governance
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: tai_rt
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    CsrfHeader:
+      name: X-CSRF-Protection
+      in: header
+      required: true
+      schema: { type: string, enum: ['1'] }
+    Search:
+      name: search
+      in: query
+      schema: { type: string, maxLength: 200 }
+    ExportFormat:
+      name: format
+      in: query
+      schema: { type: string, enum: [json, md, pdf], default: json }
+  requestBodies:
+    Reason:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [reason]
+            properties:
+              reason: { type: string, minLength: 5, maxLength: 1000 }
+    ReviewDecision:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [decision]
+            properties:
+              decision: { type: string, enum: [APPROVE, REJECT, REQUEST_CHANGES] }
+              comment: { type: string, description: Required (≥5 characters) unless approving }
+    Json:
+      required: true
+      description: JSON body validated by the route's Zod schema; field errors are returned as `VALIDATION_ERROR` details.
+      content:
+        application/json:
+          schema: { type: object }
+  responses:
+    Ok:
+      description: Success
+      content:
+        application/json:
+          schema: { type: object }
+    Created:
+      description: Created
+      content:
+        application/json:
+          schema: { type: object }
+    Paginated:
+      description: Paginated list
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Paginated' }
+    File:
+      description: File download (`Content-Disposition` carries the file name)
+      content:
+        application/pdf: {}
+        text/markdown: {}
+        application/json: {}
+    History:
+      description: Events for the record, read from the immutable audit log
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              events: { type: array, items: { $ref: '#/components/schemas/AuditLog' } }
+    NoContent:
+      description: No content
+    NotFound:
+      description: Not found, or not visible to the caller
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: The record is in a state that does not allow this action
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unprocessable:
+      description: Business rule not satisfied (for example unmet certificate requirements); `details` lists what is missing
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing or invalid access token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated but lacking the required permission
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: VALIDATION_ERROR }
+            message: { type: string }
+            details: {}
+            requestId: { type: string }
+    RoleName:
+      type: string
+      enum: [SUPER_ADMIN, ADMIN, FACULTY, STUDENT, DEVELOPER, PRODUCT_DEVELOPER, EXECUTIVE]
+    PageMeta:
+      type: object
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+    Paginated:
+      type: object
+      properties:
+        data: { type: array, items: { type: object } }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+    ExperimentType:
+      type: string
+      enum: [DATASET_ANALYSIS, TRAINING, SHAP, LIME, COUNTERFACTUAL, GRAD_CAM, FAIRNESS_AUDIT, FAIRNESS_MITIGATION, FGSM, PGD, ADVERSARIAL_TRAINING]
+    ReviewStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, UNDER_REVIEW, CHANGES_REQUESTED, APPROVED, REJECTED, RETIRED]
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        firstName: { type: string }
+        lastName: { type: string }
+        fullName: { type: string }
+        role: { $ref: '#/components/schemas/RoleName' }
+        roleDisplayName: { type: string }
+        status: { type: string, enum: [ACTIVE, INVITED, SUSPENDED, PENDING_DELETION, DELETED] }
+        organization: { type: string, nullable: true }
+        jobTitle: { type: string, nullable: true }
+        lastLoginAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Session:
+      type: object
+      properties:
+        accessToken: { type: string }
+        user: { $ref: '#/components/schemas/User' }
+        permissions:
+          type: array
+          items: { type: string, example: 'users:read' }
+    Password:
+      type: string
+      minLength: 12
+      maxLength: 128
+      description: Must contain lowercase, uppercase, a number and a symbol.
+    AuditLog:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid, nullable: true }
+        userEmail: { type: string, nullable: true }
+        role: { $ref: '#/components/schemas/RoleName' }
+        action: { type: string, example: user.role_change }
+        resource: { type: string, example: user }
+        resourceId: { type: string, nullable: true }
+        ipAddress: { type: string, nullable: true }
+        userAgent: { type: string, nullable: true }
+        requestId: { type: string, nullable: true }
+        before: { type: object, nullable: true }
+        after: { type: object, nullable: true }
+        result: { type: string, enum: [SUCCESS, FAILURE, DENIED] }
+        reason: { type: string, nullable: true }
+        severity: { type: string, enum: [INFO, LOW, MEDIUM, HIGH, CRITICAL] }
+        metadata: { type: object, nullable: true }
+        createdAt: { type: string, format: date-time }
+    Setting:
+      type: object
+      properties:
+        key: { type: string, example: security.maxFailedLogins }
+        category: { type: string }
+        description: { type: string }
+        value: {}
+        defaultValue: {}
+        isDefault: { type: boolean }
+        updatedAt: { type: string, format: date-time, nullable: true }
+    Notification:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string }
+        title: { type: string }
+        message: { type: string }
+        link: { type: string, nullable: true }
+        readAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      security: []
+      responses:
+        '200': { description: Process is alive }
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe (database required; Redis and ML service reported)
+      security: []
+      responses:
+        '200': { description: Ready (status may be `degraded`) }
+        '503': { description: Not ready }
+
+  /auth/registration-options:
+    get:
+      tags: [Auth]
+      summary: Public registration configuration
+      security: []
+      responses:
+        '200':
+          description: Whether self-registration is enabled and which roles may be chosen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  allowedRoles: { type: array, items: { $ref: '#/components/schemas/RoleName' } }
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Self-register (role restricted to administrator-configured self-service roles)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, firstName, lastName, acceptTerms]
+              properties:
+                email: { type: string, format: email }
+                password: { $ref: '#/components/schemas/Password' }
+                firstName: { type: string }
+                lastName: { type: string }
+                organization: { type: string }
+                role: { $ref: '#/components/schemas/RoleName' }
+                acceptTerms: { type: boolean, enum: [true] }
+      responses:
+        '201':
+          description: Account created; refresh cookie set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Sign in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Signed in; refresh cookie set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Account not active }
+        '423': { description: Account temporarily locked after repeated failures }
+        '429': { $ref: '#/components/responses/Error' }
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate the refresh token and obtain a new access token
+      description: Presenting an already-rotated token revokes the entire session family (theft detection).
+      security:
+        - refreshCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+      responses:
+        '200':
+          description: New session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Missing CSRF header or disallowed origin }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the current refresh token
+      security:
+        - refreshCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+      responses:
+        '204': { description: Signed out }
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user and effective permissions
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  permissions: { type: array, items: { type: string } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change password (revokes all other sessions)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string }
+                newPassword: { $ref: '#/components/schemas/Password' }
+      responses:
+        '200':
+          description: New session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /users:
+    get:
+      tags: [Users]
+      summary: List users
+      description: 'Requires `users:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: search, in: query, schema: { type: string } }
+        - { name: role, in: query, schema: { $ref: '#/components/schemas/RoleName' } }
+        - { name: status, in: query, schema: { type: string, enum: [ACTIVE, INVITED, SUSPENDED, PENDING_DELETION, DELETED] } }
+      responses:
+        '200':
+          description: Paginated users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/User' } }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Users]
+      summary: Create a user
+      description: 'Requires `users:manage`. Only roles ranked below the actor may be assigned (SUPER_ADMIN may assign any).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, firstName, lastName, role, password]
+              properties:
+                email: { type: string, format: email }
+                firstName: { type: string }
+                lastName: { type: string }
+                role: { $ref: '#/components/schemas/RoleName' }
+                password: { $ref: '#/components/schemas/Password' }
+                organization: { type: string }
+                jobTitle: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Error' }
+  /users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Users]
+      summary: Get a user
+      responses:
+        '200':
+          description: User
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [Users]
+      summary: Update a user (profile, role, status)
+      description: Actors cannot change their own role/status, nor manage users of equal or higher rank.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName: { type: string }
+                lastName: { type: string }
+                role: { $ref: '#/components/schemas/RoleName' }
+                status: { type: string, enum: [ACTIVE, SUSPENDED] }
+                organization: { type: string, nullable: true }
+                jobTitle: { type: string, nullable: true }
+                reason: { type: string, description: Recorded in the audit log }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Users]
+      summary: Deactivate (soft-delete) a user and revoke sessions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '204': { description: Deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /roles:
+    get:
+      tags: [Roles]
+      summary: Roles with permissions and user counts
+      responses:
+        '200': { description: Roles }
+
+  /audit-logs:
+    get:
+      tags: [Audit Logs]
+      summary: Search audit logs (read-only)
+      description: 'Requires `audit-logs:read`. There are intentionally no endpoints to modify or delete audit entries.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: userId, in: query, schema: { type: string, format: uuid } }
+        - { name: role, in: query, schema: { $ref: '#/components/schemas/RoleName' } }
+        - { name: action, in: query, description: Prefix match, schema: { type: string } }
+        - { name: resource, in: query, schema: { type: string } }
+        - { name: resourceId, in: query, schema: { type: string } }
+        - { name: severity, in: query, schema: { type: string, enum: [INFO, LOW, MEDIUM, HIGH, CRITICAL] } }
+        - { name: result, in: query, schema: { type: string, enum: [SUCCESS, FAILURE, DENIED] } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Paginated audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/AuditLog' } }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+  /audit-logs/facets:
+    get:
+      tags: [Audit Logs]
+      summary: Distinct actions and resources for filter controls
+      responses:
+        '200': { description: Facets }
+  /audit-logs/export:
+    get:
+      tags: [Audit Logs]
+      summary: Export filtered audit logs (max 10,000 rows); the export itself is audited
+      description: 'Requires `audit-logs:export`. Accepts the same filters as `GET /audit-logs`.'
+      parameters:
+        - { name: format, in: query, schema: { type: string, enum: [csv, json], default: csv } }
+      responses:
+        '200': { description: File download }
+  /audit-logs/{id}:
+    get:
+      tags: [Audit Logs]
+      summary: Get an audit entry including before/after values
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Audit entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditLog' }
+
+  /analytics/admin-dashboard:
+    get:
+      tags: [Analytics]
+      summary: Administrator dashboard metrics
+      description: 'Requires `analytics:admin`.'
+      responses:
+        '200': { description: Users, models, fairness, security, reviews, compliance and audit metrics }
+  /analytics/executive-dashboard:
+    get:
+      tags: [Analytics]
+      summary: Executive AI governance dashboard
+      description: 'Requires `analytics:executive`. The organisational risk index is the mean of fixed weights over assessed models.'
+      responses:
+        '200': { description: Risk index, inventory, high-risk models, evaluation and compliance status }
+  /analytics/me:
+    get:
+      tags: [Analytics]
+      summary: Personal learning and experimentation dashboard
+      responses:
+        '200': { description: Course progress, labs, assignments, quizzes, certificates and experiments }
+
+  /settings:
+    get:
+      tags: [Settings]
+      summary: List system settings with defaults
+      responses:
+        '200':
+          description: Settings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Setting' }
+  /settings/{key}:
+    patch:
+      tags: [Settings]
+      summary: Update a system setting (validated per key, audited)
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: {}
+      responses:
+        '200':
+          description: Updated setting
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Setting' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List my notifications
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: unreadOnly, in: query, schema: { type: string, enum: ['true', 'false'] } }
+      responses:
+        '200':
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Notification' } }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+                  unread: { type: integer }
+  /notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: Unread notification count
+      responses:
+        '200': { description: Count }
+  /notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      responses:
+        '200': { description: Number updated }
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark a notification as read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204': { description: Marked as read }
+        '404': { $ref: '#/components/responses/Error' }
+
+  # ── Learning ────────────────────────────────────────────────────────────────
+  /courses:
+    get:
+      tags: [Courses]
+      summary: List courses
+      description: 'Requires `courses:read`. Learners see published courses with their enrolment and progress; `courses:manage` holders also see drafts.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Courses]
+      summary: Create a course
+      description: 'Requires `courses:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+        '400': { $ref: '#/components/responses/Error' }
+  /courses/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Courses]
+      summary: Course with modules, lessons and the caller's progress
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Courses]
+      summary: Update or publish a course
+      description: 'Requires `courses:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /courses/{id}/enroll:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Courses]
+      summary: Enrol in a published course
+      description: 'Requires `progress:track`.'
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /courses/{id}/analytics:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Courses]
+      summary: Enrolment, completion and quiz analytics for a course
+      description: 'Requires `analytics:learning`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /courses/{id}/modules:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Courses]
+      summary: Add a module
+      description: 'Requires `courses:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /courses/{id}/modules/order:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Courses]
+      summary: Reorder modules
+      description: 'Requires `courses:manage`. Body `{ ids: string[] }` must contain every module exactly once.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /modules/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Courses]
+      summary: Update a module
+      description: 'Requires `courses:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    delete:
+      tags: [Courses]
+      summary: Delete a module
+      description: 'Requires `courses:manage`.'
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /modules/{id}/lessons:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Courses]
+      summary: Add a lesson (text, image, video or code content; Markdown is sanitised on render)
+      description: 'Requires `courses:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /modules/{id}/lessons/order:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Courses]
+      summary: Reorder lessons
+      description: 'Requires `courses:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /lessons/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Courses]
+      summary: Lesson content with previous/next navigation and the caller's progress
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    patch:
+      tags: [Courses]
+      summary: Update a lesson
+      description: 'Requires `courses:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    delete:
+      tags: [Courses]
+      summary: Delete a lesson
+      description: 'Requires `courses:manage`.'
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /lessons/{id}/progress:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Courses]
+      summary: Record lesson progress (started, completed, time spent); updates course progress
+      description: 'Requires `progress:track`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /lessons/{id}/knowledge-check:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Courses]
+      summary: Check an answer to an inline knowledge-check question
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /quizzes:
+    get:
+      tags: [Quizzes]
+      summary: List quizzes
+      description: 'Requires `quizzes:take` or `quizzes:manage`.'
+      parameters:
+        - { name: courseId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    post:
+      tags: [Quizzes]
+      summary: Create a quiz (time limit, attempt limit, pass mark, randomisation)
+      description: 'Requires `quizzes:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /quizzes/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Quizzes]
+      summary: Quiz detail; correct answers are only included for managers
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    patch:
+      tags: [Quizzes]
+      summary: Update a quiz
+      description: 'Requires `quizzes:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /quizzes/{id}/attempts:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Quizzes]
+      summary: Start an attempt with randomised question order; enforces the attempt limit
+      description: 'Requires `quizzes:take`.'
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /quizzes/{id}/questions:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Quizzes]
+      summary: Add a question
+      description: 'Requires `quizzes:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /quiz-attempts/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Quizzes]
+      summary: View one of my attempts (with explanations once submitted)
+      description: 'Requires `quizzes:take`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /quiz-attempts/{id}/submit:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Quizzes]
+      summary: Submit answers; scored on the server, late submissions past the time limit are rejected
+      description: 'Requires `quizzes:take`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /questions/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Quizzes]
+      summary: Update a question
+      description: 'Requires `quizzes:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    delete:
+      tags: [Quizzes]
+      summary: Deactivate a question (kept for attempt history)
+      description: 'Requires `quizzes:manage`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /labs:
+    get:
+      tags: [Labs]
+      summary: List labs with the caller's attempts
+      description: 'Requires `labs:run` or `labs:manage`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    post:
+      tags: [Labs]
+      summary: Create a lab
+      description: 'Requires `labs:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /labs/{idOrSlug}:
+    get:
+      tags: [Labs]
+      summary: Lab by id or slug
+      parameters:
+        - { name: idOrSlug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /labs/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Labs]
+      summary: Update a lab
+      description: 'Requires `labs:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /labs/{id}/attempts:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Labs]
+      summary: Start a lab attempt
+      description: 'Requires `labs:run`.'
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /lab-attempts/{id}/complete:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Labs]
+      summary: Complete a lab attempt, linking the completed experiment that satisfies it
+      description: 'Requires `labs:run`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  # ── Assignments, certificates and reports ───────────────────────────────────
+  /assignments:
+    get:
+      tags: [Assignments]
+      summary: List assignments
+      description: 'Requires `assignments:submit`, `assignments:manage` or `assignments:grade`. Learners see published assignments targeted at their role (or untargeted) with their latest attempt; staff see all with submission statistics.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - { name: courseId, in: query, schema: { type: string, format: uuid } }
+        - { name: published, in: query, schema: { type: string, enum: ['true', 'false'] } }
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Assignments]
+      summary: Create an assignment with a weighted rubric
+      description: 'Requires `assignments:manage`. Rubric: 1–12 uniquely named criteria whose weights total 100. Publishing notifies enrolled learners in the target roles.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [courseId, title, description, instructions, rubric]
+              properties:
+                courseId: { type: string, format: uuid }
+                moduleId: { type: string, format: uuid, nullable: true }
+                title: { type: string }
+                description: { type: string }
+                instructions: { type: string, description: Markdown }
+                targetRoles: { type: array, items: { $ref: '#/components/schemas/RoleName' } }
+                dueDate: { type: string, format: date-time, nullable: true }
+                maxScore: { type: number, default: 100 }
+                isPublished: { type: boolean, default: false }
+                rubric:
+                  type: array
+                  items:
+                    type: object
+                    required: [criterion, weight]
+                    properties:
+                      criterion: { type: string }
+                      weight: { type: number, minimum: 1, maximum: 100 }
+                      description: { type: string }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+        '400': { $ref: '#/components/responses/Error' }
+  /assignments/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Assignments]
+      summary: Assignment with rubric, my attempts and whether I can submit
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Assignments]
+      summary: Update an assignment
+      description: 'Requires `assignments:manage`. The rubric and maximum score are locked once any submission is graded (409).'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /assignments/{id}/history:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Assignments]
+      summary: Audit history of the assignment and its submissions
+      description: 'Requires `assignments:manage` or `assignments:grade`.'
+      responses:
+        '200': { $ref: '#/components/responses/History' }
+  /assignments/{id}/submissions:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Assignments]
+      summary: Submit an attempt
+      description: 'Requires `assignments:submit`. Evidence items are references to the caller''s own records (completed experiments, model cards, risk assessments, AIAs, policies) and are snapshotted; no files or code are uploaded. Blocked while an attempt awaits grading or after it is graded (409). Late submissions are flagged.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, minLength: 50, maxLength: 20000 }
+                evidence:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: object
+                    properties:
+                      type: { type: string, enum: [experiment, model_card, risk_assessment, impact_assessment, policy] }
+                      id: { type: string, format: uuid }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Assignments]
+      summary: List submissions for grading
+      description: 'Requires `assignments:grade`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: status, in: query, schema: { type: string, enum: [SUBMITTED, UNDER_REVIEW, GRADED, RETURNED] } }
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+  /submissions/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Assignments]
+      summary: Submission detail (author or grader); the author's email is shown to graders only
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /submissions/{id}/grade:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Assignments]
+      summary: Grade or return a submission
+      description: 'Requires `assignments:grade`. Graders cannot grade their own work (403). For `GRADE`, every rubric criterion needs points between 0 and its maximum; the total is computed on the server.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, feedback]
+              properties:
+                decision: { type: string, enum: [GRADE, RETURN] }
+                feedback: { type: string, minLength: 10 }
+                rubricScores:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      criterion: { type: string }
+                      points: { type: number, minimum: 0 }
+                      comment: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /certificates:
+    get:
+      tags: [Certificates]
+      summary: List certificates
+      description: 'Requires `certificates:read-own` or `certificates:manage`. Managers see every certificate (unless `mine=true`) plus the pending approval count.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - { name: status, in: query, schema: { type: string, enum: [PENDING_APPROVAL, ISSUED, REVOKED] } }
+        - { name: mine, in: query, schema: { type: string, enum: ['true', 'false'] } }
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+  /certificates/eligibility:
+    get:
+      tags: [Certificates]
+      summary: Requirement checklist for each of my enrolments
+      description: 'Requires `certificates:read-own`. Requirements: all lessons, required labs, published quizzes, the final exam, role-targeted assignments graded at 70% or more, and faculty approval.'
+      parameters:
+        - { name: courseId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /certificates/request:
+    post:
+      tags: [Certificates]
+      summary: Request a certificate once every requirement except approval is met
+      description: 'Requires `certificates:read-own`. Returns 422 `CERTIFICATE_NOT_ELIGIBLE` with the unmet requirements in `details`. Notifies certificate managers.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [courseId]
+              properties:
+                courseId: { type: string, format: uuid }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /certificates/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Certificates]
+      summary: Certificate detail (holder or manager); managers get live requirements for pending requests
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /certificates/{id}/pdf:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Certificates]
+      summary: Download the issued certificate as a PDF with a verification QR code
+      responses:
+        '200': { $ref: '#/components/responses/File' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /certificates/{id}/history:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Certificates]
+      summary: Certificate audit history
+      responses:
+        '200': { $ref: '#/components/responses/History' }
+  /certificates/{id}/approve:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Certificates]
+      summary: Approve and issue a pending certificate
+      description: 'Requires `certificates:manage`. Not allowed on one''s own certificate. Requirements are re-checked (422 if no longer met).'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment: { type: string, maxLength: 1000 }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /certificates/{id}/decline:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Certificates]
+      summary: Decline a pending request (the request is removed and the learner notified)
+      description: 'Requires `certificates:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Reason' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /certificates/{id}/revoke:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Certificates]
+      summary: Revoke an issued certificate
+      description: 'Requires `certificates:manage`. The public verification page then reports the certificate as revoked.'
+      requestBody: { $ref: '#/components/requestBodies/Reason' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /verify/{code}:
+    get:
+      tags: [Certificates]
+      summary: Public certificate verification (QR code target)
+      description: 'Unauthenticated and rate limited. Returns only what is printed on the certificate: number, holder name, course, dates, status and issuer. Unknown or pending codes return 404.'
+      security: []
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9_-]{16,64}$' } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/Error' }
+  /reports/sources:
+    get:
+      tags: [Reports]
+      summary: Records the caller can generate reports from
+      description: 'Requires `reports:generate`. Completed XAI, fairness and robustness experiments with stored results (own, or all with `experiments:read-all` and `scope=all`), visible model cards, and risk assessments and AIAs when the caller can read them.'
+      parameters:
+        - { name: scope, in: query, schema: { type: string, enum: [mine, all], default: mine } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /reports/{type}/{id}:
+    get:
+      tags: [Reports]
+      summary: Generate a report from stored results
+      description: 'Requires `reports:generate` plus read access to the record. Experiment reports are rendered from stored results only, keep unfavourable findings and trade-offs, and carry an educational-simulation watermark. The generation is audited.'
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string, enum: [experiment, model_card, risk_assessment, impact_assessment] } }
+        - $ref: '#/components/parameters/Id'
+        - { name: format, in: query, schema: { type: string, enum: [pdf, md, json], default: pdf } }
+      responses:
+        '200': { $ref: '#/components/responses/File' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  # ── Datasets, models and experiments ────────────────────────────────────────
+  /datasets:
+    get:
+      tags: [Datasets]
+      summary: List datasets visible to the caller (own, shared and public)
+      description: 'Requires `datasets:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - { name: status, in: query, schema: { type: string, enum: [UPLOADED, PROCESSING, READY, INVALID] } }
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Datasets]
+      summary: Upload a CSV dataset
+      description: 'Requires `datasets:upload`. The file is validated (extension, MIME type, size limit from `uploads.maxDatasetSizeMb`, UTF-8, consistent columns, no formula injection) before it is stored. Profiling runs in the ML sandbox.'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, name]
+              properties:
+                file: { type: string, format: binary }
+                name: { type: string }
+                description: { type: string }
+                targetColumn: { type: string }
+                sensitiveColumns: { type: string, description: Comma-separated or JSON array }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+        '413': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /datasets/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Datasets]
+      summary: Dataset detail with column profile and group outcome rates
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Datasets]
+      summary: Update metadata, target column, sensitive columns and visibility
+      description: 'Requires `datasets:upload` (own) or `datasets:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    delete:
+      tags: [Datasets]
+      summary: Delete a dataset (audited with a reason)
+      description: 'Requires `datasets:upload` (own) or `datasets:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Reason' }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /datasets/{id}/preview:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Datasets]
+      summary: First rows of the dataset; sensitive columns are masked unless the caller may see them
+      parameters:
+        - { name: rows, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /datasets/{id}/download:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Datasets]
+      summary: Download the original CSV (audited)
+      description: 'Requires `datasets:upload` (own) or `datasets:manage`.'
+      responses:
+        '200': { $ref: '#/components/responses/File' }
+  /datasets/{id}/analyze:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Datasets]
+      summary: Queue a profiling run in the sandbox
+      description: 'Requires `experiments:run`.'
+      responses:
+        '202': { $ref: '#/components/responses/Ok' }
+  /models:
+    get:
+      tags: [Models]
+      summary: Model registry
+      description: 'Requires `models:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - { name: lifecycleStage, in: query, schema: { type: string } }
+        - { name: riskLevel, in: query, schema: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] } }
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Models]
+      summary: Register a model
+      description: 'Requires `models:upload` or `models:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /models/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Models]
+      summary: Model with versions, evaluation statuses (explainability, fairness, security) and lineage
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Models]
+      summary: Update model metadata
+      description: 'Requires `models:upload` or `models:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /models/{id}/lifecycle:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Models]
+      summary: Move a model through its lifecycle
+      description: 'Requires `models:upload` or `models:manage`. Promotion to production requires a different approver than the owner and passing evaluations.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /models/{id}/versions:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Models]
+      summary: Upload a model version (ONNX or metadata-only; pickled code is never loaded)
+      description: 'Requires `models:upload` or `models:manage`. Size limited by `uploads.maxModelSizeMb`.'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+                version: { type: string }
+                notes: { type: string }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /model-versions/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Models]
+      summary: Model version with metrics, fingerprint and source experiment
+      description: 'Requires `models:read`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /model-versions/{id}/artifact:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Models]
+      summary: Download the version artifact (audited)
+      description: 'Requires `models:read` and visibility of the model.'
+      responses:
+        '200': { $ref: '#/components/responses/File' }
+  /experiments/algorithms:
+    get:
+      tags: [Experiments]
+      summary: Training algorithms and their hyper-parameter limits
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /experiments/sources:
+    get:
+      tags: [Experiments]
+      summary: Datasets and model versions the caller can run experiments on
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /experiments:
+    get:
+      tags: [Experiments]
+      summary: List experiments (own, or all with `experiments:read-all` and `scope=all`)
+      description: 'Requires one of `experiments:run`, `experiments:read-all`, `xai:run`, `fairness:run`, `robustness:run`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/ExperimentType' } }
+        - { name: status, in: query, schema: { type: string, enum: [QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED] } }
+        - { name: scope, in: query, schema: { type: string, enum: [mine, all], default: mine } }
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Experiments]
+      summary: Queue an experiment
+      description: 'The run executes in the sandboxed ML service with CPU, memory, time and output limits. Only declarative parameters are accepted; uploaded code is never executed. The type-specific permission is required (`xai:run`, `fairness:run`, `robustness:run` or `experiments:run`).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, params]
+              properties:
+                type: { $ref: '#/components/schemas/ExperimentType' }
+                name: { type: string }
+                datasetId: { type: string, format: uuid }
+                modelVersionId: { type: string, format: uuid }
+                params: { type: object }
+      responses:
+        '202': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /experiments/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Experiments]
+      summary: Experiment with status, logs and stored results
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /experiments/{id}/cancel:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Experiments]
+      summary: Cancel a queued or running experiment
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /experiments/{id}/rerun:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Experiments]
+      summary: Re-run with identical parameters and seed (reproducibility check)
+      responses:
+        '202': { $ref: '#/components/responses/Ok' }
+
+  # ── Model cards ─────────────────────────────────────────────────────────────
+  /model-cards:
+    get:
+      tags: [Model Cards]
+      summary: List model cards (published cards, plus own drafts and cards in review for reviewers)
+      description: 'Requires `model-cards:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - { name: status, in: query, schema: { type: string, enum: [DRAFT, IN_REVIEW, PUBLISHED, ARCHIVED] } }
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Model Cards]
+      summary: Create a draft card
+      description: 'Requires `model-cards:manage`. Metrics marked as coming from a model version or experiment must match the recorded values (400 otherwise).'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+        '400': { $ref: '#/components/responses/Error' }
+  /model-cards/prefill:
+    get:
+      tags: [Model Cards]
+      summary: Card content pre-filled from the model version and its completed evaluations
+      description: 'Requires `model-cards:manage` and `models:read`.'
+      parameters:
+        - { name: modelId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: versionId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /model-cards/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Model Cards]
+      summary: Card with readiness check and allowed actions
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Model Cards]
+      summary: Update a draft
+      description: 'Requires `model-cards:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Model Cards]
+      summary: Delete a draft
+      description: 'Requires `model-cards:manage`.'
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /model-cards/{id}/submit:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Model Cards]
+      summary: Submit for review (requires a complete card)
+      description: 'Requires `model-cards:manage`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /model-cards/{id}/withdraw:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Model Cards]
+      summary: Withdraw from review
+      description: 'Requires `model-cards:manage`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /model-cards/{id}/review:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Model Cards]
+      summary: Publish or request changes
+      description: 'Requires `model-cards:publish`. The owner cannot review their own card.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [PUBLISH, REQUEST_CHANGES] }
+                comment: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /model-cards/{id}/versions:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Model Cards]
+      summary: Version lineage of the card
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    post:
+      tags: [Model Cards]
+      summary: Start a new draft version from a published card
+      description: 'Requires `model-cards:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /model-cards/{id}/archive:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Model Cards]
+      summary: Archive a card (owner or publisher)
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /model-cards/{id}/history:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Model Cards]
+      summary: Card audit history
+      responses:
+        '200': { $ref: '#/components/responses/History' }
+  /model-cards/{id}/export:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Model Cards]
+      summary: Export as JSON, Markdown or PDF (includes the not-proof-of-compliance disclaimer)
+      parameters:
+        - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        '200': { $ref: '#/components/responses/File' }
+
+  # ── Risk and impact assessments ─────────────────────────────────────────────
+  /risk-assessments:
+    get:
+      tags: [Risk Assessments]
+      summary: List risk assessments
+      description: 'Requires `risk:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ReviewStatus' } }
+        - { name: riskLevel, in: query, schema: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] } }
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Risk Assessments]
+      summary: Save a draft assessment; the score is computed on the server
+      description: 'Requires `risk:assess`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /risk-assessments/score:
+    post:
+      tags: [Risk Assessments]
+      summary: Preview the rule-based score, contributing factors, recommended controls and potential compliance considerations
+      description: 'Requires `risk:assess`. Considerations are flagged for legal review; they are not compliance determinations.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/Error' }
+  /risk-assessments/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Risk Assessments]
+      summary: Assessment with score breakdown and allowed actions
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Risk Assessments]
+      summary: Update a draft or changes-requested assessment
+      description: 'Requires `risk:assess`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Risk Assessments]
+      summary: Delete a draft
+      description: 'Requires `risk:assess`.'
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /risk-assessments/{id}/submit:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Risk Assessments]
+      summary: Submit for review
+      description: 'Requires `risk:assess`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /risk-assessments/{id}/withdraw:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Risk Assessments]
+      summary: Withdraw a submitted assessment
+      description: 'Requires `risk:assess`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /risk-assessments/{id}/start-review:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Risk Assessments]
+      summary: Start reviewing (the assessor cannot review their own work)
+      description: 'Requires `risk:review`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /risk-assessments/{id}/review:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Risk Assessments]
+      summary: Approve, reject or request changes; approval sets the AI system's risk level and next review date
+      description: 'Requires `risk:review`.'
+      requestBody: { $ref: '#/components/requestBodies/ReviewDecision' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /risk-assessments/{id}/retire:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Risk Assessments]
+      summary: Retire an approved assessment
+      description: 'Requires `risk:review`.'
+      requestBody: { $ref: '#/components/requestBodies/Reason' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /risk-assessments/{id}/history:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Risk Assessments]
+      summary: Status history with snapshots and reviewer comments
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /risk-assessments/{id}/export:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Risk Assessments]
+      summary: Export as JSON, Markdown or PDF
+      parameters:
+        - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        '200': { $ref: '#/components/responses/File' }
+  /impact-assessments:
+    get:
+      tags: [Impact Assessments]
+      summary: List algorithmic impact assessments
+      description: 'Requires `aia:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ReviewStatus' } }
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Impact Assessments]
+      summary: Create a draft AIA (15 sections plus a structured harms table)
+      description: 'Requires `aia:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /impact-assessments/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Impact Assessments]
+      summary: AIA with readiness (missing sections, concerns) and allowed actions
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Impact Assessments]
+      summary: Update a draft or changes-requested AIA
+      description: 'Requires `aia:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    delete:
+      tags: [Impact Assessments]
+      summary: Delete a draft
+      description: 'Requires `aia:manage`.'
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /impact-assessments/{id}/submit:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Impact Assessments]
+      summary: Submit for approval (422 `AIA_INCOMPLETE` lists missing sections and unmitigated high-severity harms)
+      description: 'Requires `aia:manage`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /impact-assessments/{id}/withdraw:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Impact Assessments]
+      summary: Withdraw a submitted AIA
+      description: 'Requires `aia:manage`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /impact-assessments/{id}/start-review:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Impact Assessments]
+      summary: Start reviewing (not the author)
+      description: 'Requires `aia:approve`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /impact-assessments/{id}/review:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Impact Assessments]
+      summary: Approve, reject or request changes
+      description: 'Requires `aia:approve`.'
+      requestBody: { $ref: '#/components/requestBodies/ReviewDecision' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /impact-assessments/{id}/retire:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Impact Assessments]
+      summary: Retire an approved AIA
+      description: 'Requires `aia:approve`.'
+      requestBody: { $ref: '#/components/requestBodies/Reason' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /impact-assessments/{id}/history:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Impact Assessments]
+      summary: Version and status history with snapshots and comments
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /impact-assessments/{id}/export:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Impact Assessments]
+      summary: Export as JSON, Markdown or PDF
+      parameters:
+        - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        '200': { $ref: '#/components/responses/File' }
+
+  # ── Governance ──────────────────────────────────────────────────────────────
+  /governance/overview:
+    get:
+      tags: [Governance]
+      summary: Live governance overview (inventory, Shadow AI, risk register, incidents, policies, reviews)
+      description: 'Requires `governance:read`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /governance/approvals:
+    get:
+      tags: [Governance]
+      summary: Items awaiting the caller's review across modules
+      description: 'Requires `governance:read`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /governance/ai-systems:
+    get:
+      tags: [Governance]
+      summary: AI system inventory, including Shadow AI
+      description: 'Requires `governance:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - { name: shadow, in: query, schema: { type: string, enum: ['true', 'false'] } }
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Governance]
+      summary: Register an AI system (starts as PROPOSED)
+      description: 'Requires `ai-systems:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /governance/ai-systems/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Governance]
+      summary: AI system with linked assessments and activation blockers
+      description: 'Requires `governance:read`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    patch:
+      tags: [Governance]
+      summary: Update an AI system
+      description: 'Requires `ai-systems:manage`. Activation is gated: an approved risk assessment is required, and HIGH/CRITICAL systems also need an approved AIA (409 `GOVERNANCE_GATE`).'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /governance/ai-systems/{id}/resolve-shadow:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Governance]
+      summary: Resolve a Shadow AI finding by sanctioning (bringing under governance) or prohibiting it
+      description: 'Requires `ai-systems:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /governance/ai-systems/{id}/history:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Governance]
+      summary: AI system audit history
+      description: 'Requires `governance:read`.'
+      responses:
+        '200': { $ref: '#/components/responses/History' }
+  /governance/policies:
+    get:
+      tags: [Governance]
+      summary: Policies (including Shadow AI and acceptable-use policies)
+      description: 'Requires `governance:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Governance]
+      summary: Draft a policy
+      description: 'Requires `policies:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /governance/policies/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Governance]
+      summary: Policy detail
+      description: 'Requires `governance:read`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    patch:
+      tags: [Governance]
+      summary: Update a draft policy
+      description: 'Requires `policies:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /governance/policies/{id}/submit:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Governance]
+      summary: Submit a policy for approval
+      description: 'Requires `policies:manage`.'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /governance/policies/{id}/approve:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Governance]
+      summary: Approve a policy (not the author)
+      description: 'Requires `policies:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /governance/policies/{id}/reject:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Governance]
+      summary: Reject a policy with a comment
+      description: 'Requires `policies:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /governance/policies/{id}/revise:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Governance]
+      summary: Start a revision of an approved policy
+      description: 'Requires `policies:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Reason' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /governance/policies/{id}/retire:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Governance]
+      summary: Retire a policy
+      description: 'Requires `policies:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Reason' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /governance/policies/{id}/history:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Governance]
+      summary: Policy audit history
+      description: 'Requires `governance:read`.'
+      responses:
+        '200': { $ref: '#/components/responses/History' }
+  /governance/incidents:
+    get:
+      tags: [Governance]
+      summary: AI incidents (reporters see their own; governance readers see all)
+      description: 'Requires `governance:read`, `incidents:report` or `incidents:manage`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Governance]
+      summary: Report an incident
+      description: 'Requires `incidents:report`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /governance/incidents/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Governance]
+      summary: Incident detail
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    patch:
+      tags: [Governance]
+      summary: Triage, assign or resolve (resolution requires root cause and corrective actions)
+      description: 'Requires `incidents:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/Error' }
+  /governance/incidents/{id}/history:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Governance]
+      summary: Incident audit history
+      responses:
+        '200': { $ref: '#/components/responses/History' }
+  /governance/risks:
+    get:
+      tags: [Governance]
+      summary: AI risk register
+      description: 'Requires `governance:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Governance]
+      summary: Add a register entry
+      description: 'Requires `governance:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /governance/risks/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Governance]
+      summary: Update a register entry
+      description: 'Requires `governance:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /governance/compliance:
+    get:
+      tags: [Governance]
+      summary: Potential compliance considerations checklist (with a not-a-determination disclaimer)
+      description: 'Requires `governance:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+  /governance/compliance/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Governance]
+      summary: Record human/legal review status and evidence; there is no automatic "compliant" status
+      description: 'Requires `compliance:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/Error' }
+  /governance/vendors:
+    get:
+      tags: [Governance]
+      summary: Third-party AI vendor assessments
+      description: 'Requires `governance:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Governance]
+      summary: Add a vendor assessment
+      description: 'Requires `governance:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /governance/vendors/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Governance]
+      summary: Update a vendor assessment
+      description: 'Requires `governance:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /governance/vendors/{id}/decision:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Governance]
+      summary: Move a vendor assessment through review (start review, approve, reject or request changes)
+      description: 'Requires `governance:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /governance/oversight:
+    get:
+      tags: [Governance]
+      summary: Human oversight records (overrides, escalations, sign-offs)
+      description: 'Requires `governance:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Governance]
+      summary: Record a human oversight action
+      description: 'Requires `governance:manage` or `risk:review`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /governance/reviews:
+    get:
+      tags: [Governance]
+      summary: Scheduled governance reviews
+      description: 'Requires `governance:read`.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
+    post:
+      tags: [Governance]
+      summary: Schedule a review
+      description: 'Requires `governance:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /governance/reviews/{id}/complete:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Governance]
+      summary: Complete a review with an outcome and follow-up
+      description: 'Requires `governance:manage`.'
+      requestBody: { $ref: '#/components/requestBodies/Json' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
