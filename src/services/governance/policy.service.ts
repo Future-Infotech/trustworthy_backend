@@ -70,7 +70,7 @@ export const policyService = {
     const where: Prisma.GovernancePolicyWhereInput = {
       status: q.status,
       category: q.category,
-      OR: q.search ? [{ title: { contains: q.search, mode: 'insensitive' } }, { summary: { contains: q.search, mode: 'insensitive' } }] : undefined,
+      OR: q.search ? [{ title: { contains: q.search } }, { summary: { contains: q.search } }] : undefined,
     };
     const [rows, total] = await Promise.all([
       prisma.governancePolicy.findMany({ where, include, orderBy: [{ status: 'asc' }, { title: 'asc' }], ...toSkipTake(q) }),

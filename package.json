@@ -17,7 +17,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "prisma db seed",
-    "prisma:reset": "prisma migrate reset --force"
+    "prisma:reset": "prisma migrate reset --force",
+    "prisma:load-mechanical": "tsx prisma/load-mechanical-datasets.ts"
   },
   "prisma": {
     "schema": "prisma/schema.prisma",

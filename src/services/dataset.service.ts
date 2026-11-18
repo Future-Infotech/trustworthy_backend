@@ -6,6 +6,7 @@ import type { AuthContext } from '../middleware/authorize';
 import { analyzeCsv, CsvValidationError, decodeCsv, type CsvAnalysis } from '../utils/csv';
 import { sha256 } from '../utils/crypto';
 import { AppError, Errors } from '../utils/errors';
+import { stringList } from '../utils/jsonList';
 import { paginate, toSkipTake } from '../utils/pagination';
 import type { ListDatasetsQuery, UpdateDatasetInput, UploadDatasetInput } from '../validators/asset.validators';
 import { auditService } from './audit.service';
@@ -67,7 +68,7 @@ export const datasetService = {
         datasetVisibilityWhere(auth),
         query.mine ? { ownerId: auth.actor.id } : {},
         query.status ? { status: query.status } : {},
-        query.search ? { OR: [{ name: { contains: query.search, mode: 'insensitive' } }, { description: { contains: query.search, mode: 'insensitive' } }] } : {},
+        query.search ? { OR: [{ name: { contains: query.search } }, { description: { contains: query.search } }] } : {},
       ],
     };
     const [items, total] = await prisma.$transaction([
@@ -212,7 +213,7 @@ export const datasetService = {
     const columns = (await prisma.datasetColumn.findMany({ where: { datasetId: id }, select: { name: true } })).map((c) => c.name);
     assertColumns(columns, [input.targetColumn, ...(input.sensitiveColumns ?? [])]);
     const target = input.targetColumn !== undefined ? input.targetColumn : before.targetColumn;
-    const sensitive = input.sensitiveColumns ?? before.sensitiveColumns;
+    const sensitive = input.sensitiveColumns ?? stringList(before.sensitiveColumns);
     if (target && sensitive.includes(target)) {
       throw Errors.validation([{ path: 'targetColumn', message: 'The target cannot also be a sensitive column' }]);
     }
@@ -252,7 +253,7 @@ export const datasetService = {
     const text = (await getStorage().get(dataset.storageKey)).toString('utf8');
     const { headers, rows } = analyzeCsv(text);
     const maskEnabled = await settingsService.get('privacy.maskSensitiveFields');
-    const masked = maskEnabled && !canEdit(dataset, auth) ? dataset.sensitiveColumns.filter((c) => headers.includes(c)) : [];
+    const masked = maskEnabled && !canEdit(dataset, auth) ? stringList(dataset.sensitiveColumns).filter((c) => headers.includes(c)) : [];
     const maskIdx = new Set(masked.map((c) => headers.indexOf(c)));
     const page = rows.slice(query.offset, query.offset + query.limit).map((r) => r.map((v, i) => (maskIdx.has(i) && v !== '' ? MASK : v)));
     return { headers, rows: page, total: rows.length, offset: query.offset, maskedColumns: masked };

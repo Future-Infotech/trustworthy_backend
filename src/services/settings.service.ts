@@ -46,6 +46,12 @@ export const SETTING_DEFINITIONS = {
     schema: z.number().int().min(1).max(500),
     default: 100,
   },
+  'uploads.maxCourseMediaMb': {
+    category: 'Uploads',
+    description: 'Maximum size of a lesson video, slide image or PDF upload in megabytes. Host long videos on a video platform or CDN instead.',
+    schema: z.number().int().min(1).max(500),
+    default: 100,
+  },
   'privacy.datasetRetentionDays': {
     category: 'Privacy',
     description: 'Default number of days uploaded datasets are retained before scheduled deletion.',

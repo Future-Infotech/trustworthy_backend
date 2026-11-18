@@ -1,8 +1,9 @@
 // Trustworthy AI-Driven Digital Transformation Platform
-// PostgreSQL schema covering all platform modules (phases 1-10).
+// MySQL/MariaDB schema covering all platform modules (phases 1-10).
 //
 // Conventions
-//  - UUID primary keys (`@db.Uuid`)
+//  - UUID primary keys stored as CHAR(36) (`@db.Char(36)`)
+//  - Scalar lists (not supported by MySQL) are stored as JSON arrays; filter them in application code
 //  - snake_case table names via @@map
 //  - createdAt / updatedAt on mutable entities; createdById / updatedById are
 //    audit columns (users are never hard-deleted, so the ids remain resolvable)
@@ -14,7 +15,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -49,6 +50,7 @@ enum CourseStatus {
 enum LessonType {
   TEXT
   VIDEO
+  SLIDES
   IMAGE
   CODE
   KNOWLEDGE_CHECK
@@ -285,10 +287,10 @@ enum DeletionRequestStatus {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Role {
-  id          String           @id @default(uuid()) @db.Uuid
+  id          String           @id @default(uuid()) @db.Char(36)
   name        RoleName         @unique
-  displayName String
-  description String?
+  displayName String           @db.Text
+  description String?          @db.Text
   isSystem    Boolean          @default(true)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
@@ -299,11 +301,11 @@ model Role {
 }
 
 model Permission {
-  id          String           @id @default(uuid()) @db.Uuid
-  key         String           @unique
-  resource    String
-  action      String
-  description String?
+  id          String           @id @default(uuid()) @db.Char(36)
+  key         String           @unique @db.VarChar(255)
+  resource    String           @db.VarChar(255)
+  action      String           @db.Text
+  description String?          @db.Text
   createdAt   DateTime         @default(now())
   roles       RolePermission[]
 
@@ -312,8 +314,8 @@ model Permission {
 }
 
 model RolePermission {
-  roleId       String     @db.Uuid
-  permissionId String     @db.Uuid
+  roleId       String     @db.Char(36)
+  permissionId String     @db.Char(36)
   createdAt    DateTime   @default(now())
   role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
   permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
@@ -324,15 +326,15 @@ model RolePermission {
 }
 
 model User {
-  id                  String     @id @default(uuid()) @db.Uuid
-  email               String     @unique
-  passwordHash        String
-  firstName           String
-  lastName            String
-  roleId              String     @db.Uuid
+  id                  String     @id @default(uuid()) @db.Char(36)
+  email               String     @unique @db.VarChar(255)
+  passwordHash        String     @db.Text
+  firstName           String     @db.Text
+  lastName            String     @db.Text
+  roleId              String     @db.Char(36)
   status              UserStatus @default(ACTIVE)
-  organization        String?
-  jobTitle            String?
+  organization        String?    @db.Text
+  jobTitle            String?    @db.Text
   lastLoginAt         DateTime?
   failedLoginAttempts Int        @default(0)
   lockedUntil         DateTime?
@@ -340,8 +342,8 @@ model User {
   deletedAt           DateTime?
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
-  createdById         String?    @db.Uuid
-  updatedById         String?    @db.Uuid
+  createdById         String?    @db.Char(36)
+  updatedById         String?    @db.Char(36)
 
   role              Role                          @relation(fields: [roleId], references: [id])
   refreshTokens     RefreshToken[]
@@ -375,19 +377,19 @@ model User {
 }
 
 model RefreshToken {
-  id                String    @id @default(uuid()) @db.Uuid
-  userId            String    @db.Uuid
+  id                String    @id @default(uuid()) @db.Char(36)
+  userId            String    @db.Char(36)
   /// SHA-256 of the opaque token; the raw token is never stored.
-  tokenHash         String    @unique
+  tokenHash         String    @unique @db.VarChar(255)
   /// All tokens produced by rotation from one login share a family id, so that
   /// reuse of a rotated token revokes the entire family.
-  familyId          String    @db.Uuid
+  familyId          String    @db.Char(36)
   expiresAt         DateTime
   revokedAt         DateTime?
-  revokedReason     String?
-  replacedByTokenId String?   @db.Uuid
-  createdByIp       String?
-  userAgent         String?
+  revokedReason     String?   @db.Text
+  replacedByTokenId String?   @db.Char(36)
+  createdByIp       String?   @db.Text
+  userAgent         String?   @db.Text
   createdAt         DateTime  @default(now())
   user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -398,12 +400,12 @@ model RefreshToken {
 }
 
 model ConsentRecord {
-  id            String   @id @default(uuid()) @db.Uuid
-  userId        String   @db.Uuid
-  consentType   String
+  id            String   @id @default(uuid()) @db.Char(36)
+  userId        String   @db.Char(36)
+  consentType   String   @db.VarChar(255)
   granted       Boolean
-  policyVersion String
-  ipAddress     String?
+  policyVersion String   @db.Text
+  ipAddress     String?  @db.Text
   createdAt     DateTime @default(now())
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -412,14 +414,14 @@ model ConsentRecord {
 }
 
 model DataDeletionRequest {
-  id            String                @id @default(uuid()) @db.Uuid
-  userId        String                @db.Uuid
+  id            String                @id @default(uuid()) @db.Char(36)
+  userId        String                @db.Char(36)
   status        DeletionRequestStatus @default(PENDING)
-  reason        String?
-  notes         String?
+  reason        String?               @db.Text
+  notes         String?               @db.Text
   requestedAt   DateTime              @default(now())
   processedAt   DateTime?
-  processedById String?               @db.Uuid
+  processedById String?               @db.Char(36)
   user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -432,21 +434,21 @@ model DataDeletionRequest {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Course {
-  id            String       @id @default(uuid()) @db.Uuid
-  title         String
-  slug          String       @unique
-  summary       String
-  description   String
-  coverImageUrl String?
-  level         String       @default("Intermediate")
+  id            String       @id @default(uuid()) @db.Char(36)
+  title         String       @db.Text
+  slug          String       @unique @db.VarChar(255)
+  summary       String       @db.Text
+  description   String       @db.Text
+  coverImageUrl String?      @db.Text
+  level         String       @default("Intermediate") @db.VarChar(255)
   durationHours Int?
   status        CourseStatus @default(DRAFT)
-  instructorId  String?      @db.Uuid
+  instructorId  String?      @db.Char(36)
   publishedAt   DateTime?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
-  createdById   String?      @db.Uuid
-  updatedById   String?      @db.Uuid
+  createdById   String?      @db.Char(36)
+  updatedById   String?      @db.Char(36)
 
   instructor   User?         @relation("CourseInstructor", fields: [instructorId], references: [id], onDelete: SetNull)
   modules      Module[]
@@ -462,18 +464,18 @@ model Course {
 }
 
 model Module {
-  id               String   @id @default(uuid()) @db.Uuid
-  courseId         String   @db.Uuid
-  title            String
-  summary          String
+  id               String   @id @default(uuid()) @db.Char(36)
+  courseId         String   @db.Char(36)
+  title            String   @db.Text
+  summary          String   @db.Text
   order            Int
-  objectives       String[]
+  objectives       Json     @default("[]")
   estimatedMinutes Int?
   isRequired       Boolean  @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
-  createdById      String?  @db.Uuid
-  updatedById      String?  @db.Uuid
+  createdById      String?  @db.Char(36)
+  updatedById      String?  @db.Char(36)
 
   course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
   lessons     Lesson[]
@@ -487,25 +489,29 @@ model Module {
 }
 
 model Lesson {
-  id               String     @id @default(uuid()) @db.Uuid
-  moduleId         String     @db.Uuid
-  title            String
+  id               String     @id @default(uuid()) @db.Char(36)
+  moduleId         String     @db.Char(36)
+  title            String     @db.Text
   type             LessonType @default(TEXT)
   /// Markdown body.
-  content          String
+  content          String     @db.Text
   /// [{ type: "image" | "video", url, caption }]
   media            Json?
-  codeSnippet      String?
-  codeLanguage     String?
-  videoUrl         String?
+  codeSnippet      String?    @db.Text
+  codeLanguage     String?    @db.Text
+  videoUrl         String?    @db.Text
+  /// Slide deck as images: [{ url, title?, notes? }]. Shown in the in-app slide viewer.
+  slides           Json?
+  /// A whole deck as one document: an uploaded PDF or an https embed (Google Slides, OneDrive, SlideShare).
+  slidesUrl        String?    @db.Text
   /// Inline knowledge check: [{ prompt, options, correctOptionIds, explanation }]
   knowledgeCheck   Json?
   order            Int
   estimatedMinutes Int?
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
-  createdById      String?    @db.Uuid
-  updatedById      String?    @db.Uuid
+  createdById      String?    @db.Char(36)
+  updatedById      String?    @db.Char(36)
 
   module   Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   progress Progress[]
@@ -515,9 +521,9 @@ model Lesson {
 }
 
 model Enrollment {
-  id              String           @id @default(uuid()) @db.Uuid
-  userId          String           @db.Uuid
-  courseId        String           @db.Uuid
+  id              String           @id @default(uuid()) @db.Char(36)
+  userId          String           @db.Char(36)
+  courseId        String           @db.Char(36)
   status          EnrollmentStatus @default(ACTIVE)
   progressPercent Float            @default(0)
   enrolledAt      DateTime         @default(now())
@@ -533,12 +539,14 @@ model Enrollment {
 }
 
 model Progress {
-  id               String         @id @default(uuid()) @db.Uuid
-  userId           String         @db.Uuid
-  lessonId         String         @db.Uuid
-  moduleId         String         @db.Uuid
+  id               String         @id @default(uuid()) @db.Char(36)
+  userId           String         @db.Char(36)
+  lessonId         String         @db.Char(36)
+  moduleId         String         @db.Char(36)
   status           ProgressStatus @default(NOT_STARTED)
   timeSpentSeconds Int            @default(0)
+  /// Resume point: seconds into a video, or the zero-based slide index of a deck.
+  lastPosition     Int            @default(0)
   lastAccessedAt   DateTime       @default(now())
   completedAt      DateTime?
   createdAt        DateTime       @default(now())
@@ -558,22 +566,22 @@ model Progress {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Lab {
-  id               String   @id @default(uuid()) @db.Uuid
-  courseId         String?  @db.Uuid
-  moduleId         String?  @db.Uuid
-  slug             String   @unique
-  title            String
+  id               String   @id @default(uuid()) @db.Char(36)
+  courseId         String?  @db.Char(36)
+  moduleId         String?  @db.Char(36)
+  slug             String   @unique @db.VarChar(255)
+  title            String   @db.Text
   type             LabType
-  description      String
-  instructions     String
+  description      String   @db.Text
+  instructions     String   @db.Text
   /// Default experiment configuration offered to learners.
   config           Json?
   isRequired       Boolean  @default(false)
   estimatedMinutes Int?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
-  createdById      String?  @db.Uuid
-  updatedById      String?  @db.Uuid
+  createdById      String?  @db.Char(36)
+  updatedById      String?  @db.Char(36)
 
   course   Course?      @relation(fields: [courseId], references: [id], onDelete: SetNull)
   module   Module?      @relation(fields: [moduleId], references: [id], onDelete: SetNull)
@@ -585,13 +593,13 @@ model Lab {
 }
 
 model LabAttempt {
-  id           String        @id @default(uuid()) @db.Uuid
-  labId        String        @db.Uuid
-  userId       String        @db.Uuid
-  experimentId String?       @db.Uuid
+  id           String        @id @default(uuid()) @db.Char(36)
+  labId        String        @db.Char(36)
+  userId       String        @db.Char(36)
+  experimentId String?       @db.Char(36)
   status       AttemptStatus @default(IN_PROGRESS)
   score        Float?
-  notes        String?
+  notes        String?       @db.Text
   startedAt    DateTime      @default(now())
   completedAt  DateTime?
   updatedAt    DateTime      @updatedAt
@@ -606,22 +614,22 @@ model LabAttempt {
 }
 
 model Assignment {
-  id           String     @id @default(uuid()) @db.Uuid
-  courseId     String     @db.Uuid
-  moduleId     String?    @db.Uuid
-  title        String
-  description  String
-  instructions String
-  targetRoles  RoleName[]
+  id           String    @id @default(uuid()) @db.Char(36)
+  courseId     String    @db.Char(36)
+  moduleId     String?   @db.Char(36)
+  title        String    @db.Text
+  description  String    @db.Text
+  instructions String    @db.Text
+  targetRoles  Json      @default("[]")
   dueDate      DateTime?
-  maxScore     Int        @default(100)
+  maxScore     Int       @default(100)
   /// [{ criterion, weight, description }]
   rubric       Json?
-  isPublished  Boolean    @default(false)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  createdById  String?    @db.Uuid
-  updatedById  String?    @db.Uuid
+  isPublished  Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  createdById  String?   @db.Char(36)
+  updatedById  String?   @db.Char(36)
 
   course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
   module      Module?      @relation(fields: [moduleId], references: [id], onDelete: SetNull)
@@ -632,11 +640,11 @@ model Assignment {
 }
 
 model Submission {
-  id            String           @id @default(uuid()) @db.Uuid
-  assignmentId  String           @db.Uuid
-  userId        String           @db.Uuid
+  id            String           @id @default(uuid()) @db.Char(36)
+  assignmentId  String           @db.Char(36)
+  userId        String           @db.Char(36)
   attemptNumber Int              @default(1)
-  content       String
+  content       String           @db.Text
   /// [{ storageKey, fileName, sizeBytes }]
   attachments   Json?
   status        SubmissionStatus @default(SUBMITTED)
@@ -645,8 +653,8 @@ model Submission {
   score         Float?
   /// [{ criterion, maxPoints, points, comment }] recorded by the grader.
   rubricScores  Json?
-  feedback      String?
-  gradedById    String?          @db.Uuid
+  feedback      String?          @db.Text
+  gradedById    String?          @db.Char(36)
   gradedAt      DateTime?
   submittedAt   DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
@@ -662,11 +670,11 @@ model Submission {
 }
 
 model Quiz {
-  id                  String   @id @default(uuid()) @db.Uuid
-  courseId            String?  @db.Uuid
-  moduleId            String?  @db.Uuid
-  title               String
-  description         String?
+  id                  String   @id @default(uuid()) @db.Char(36)
+  courseId            String?  @db.Char(36)
+  moduleId            String?  @db.Char(36)
+  title               String   @db.Text
+  description         String?  @db.Text
   passingScore        Int      @default(70)
   timeLimitSeconds    Int?
   attemptLimit        Int?
@@ -676,8 +684,8 @@ model Quiz {
   isPublished         Boolean  @default(false)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
-  createdById         String?  @db.Uuid
-  updatedById         String?  @db.Uuid
+  createdById         String?  @db.Char(36)
+  updatedById         String?  @db.Char(36)
 
   course    Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
   module    Module?       @relation(fields: [moduleId], references: [id], onDelete: SetNull)
@@ -691,25 +699,25 @@ model Quiz {
 
 /// Questions belong to a quiz or to the shared question bank (quizId = null).
 model Question {
-  id               String       @id @default(uuid()) @db.Uuid
-  quizId           String?      @db.Uuid
-  bankCategory     String?
+  id               String       @id @default(uuid()) @db.Char(36)
+  quizId           String?      @db.Char(36)
+  bankCategory     String?      @db.VarChar(255)
   type             QuestionType
-  prompt           String
-  scenario         String?
+  prompt           String       @db.Text
+  scenario         String?      @db.Text
   /// [{ id, text }]
   options          Json
-  correctOptionIds String[]
-  explanation      String
+  correctOptionIds Json         @default("[]")
+  explanation      String       @db.Text
   points           Int          @default(1)
-  difficulty       String       @default("MEDIUM")
-  tags             String[]
+  difficulty       String       @default("MEDIUM") @db.VarChar(255)
+  tags             Json         @default("[]")
   order            Int          @default(0)
   isActive         Boolean      @default(true)
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
-  createdById      String?      @db.Uuid
-  updatedById      String?      @db.Uuid
+  createdById      String?      @db.Char(36)
+  updatedById      String?      @db.Char(36)
 
   quiz Quiz? @relation(fields: [quizId], references: [id], onDelete: SetNull)
 
@@ -719,11 +727,11 @@ model Question {
 }
 
 model QuizAttempt {
-  id            String    @id @default(uuid()) @db.Uuid
-  quizId        String    @db.Uuid
-  userId        String    @db.Uuid
+  id            String    @id @default(uuid()) @db.Char(36)
+  quizId        String    @db.Char(36)
+  userId        String    @db.Char(36)
   attemptNumber Int
-  questionIds   String[]
+  questionIds   Json      @default("[]")
   /// { [questionId]: string[] }
   answers       Json?
   score         Float?
@@ -743,19 +751,19 @@ model QuizAttempt {
 }
 
 model Certificate {
-  id                String            @id @default(uuid()) @db.Uuid
-  userId            String            @db.Uuid
-  courseId          String            @db.Uuid
+  id                String            @id @default(uuid()) @db.Char(36)
+  userId            String            @db.Char(36)
+  courseId          String            @db.Char(36)
   /// Human-readable public identifier, e.g. TAI-2026-000123
-  certificateNumber String            @unique
+  certificateNumber String            @unique @db.VarChar(255)
   /// Unguessable token used in the public verification URL.
-  verificationCode  String            @unique
+  verificationCode  String            @unique @db.VarChar(255)
   status            CertificateStatus @default(PENDING_APPROVAL)
   completionDate    DateTime?
   issuedAt          DateTime?
-  approvedById      String?           @db.Uuid
+  approvedById      String?           @db.Char(36)
   revokedAt         DateTime?
-  revokedReason     String?
+  revokedReason     String?           @db.Text
   metadata          Json?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
@@ -773,23 +781,23 @@ model Certificate {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Dataset {
-  id                   String        @id @default(uuid()) @db.Uuid
-  name                 String
-  description          String?
-  ownerId              String        @db.Uuid
-  fileName             String
-  mimeType             String        @default("text/csv")
-  storageKey           String
+  id                   String        @id @default(uuid()) @db.Char(36)
+  name                 String        @db.Text
+  description          String?       @db.Text
+  ownerId              String        @db.Char(36)
+  fileName             String        @db.Text
+  mimeType             String        @default("text/csv") @db.VarChar(255)
+  storageKey           String        @db.Text
   sizeBytes            Int
-  checksumSha256       String
+  checksumSha256       String        @db.Text
   rowCount             Int?
   columnCount          Int?
   duplicateRowCount    Int?
   missingCellCount     Int?
   status               DatasetStatus @default(UPLOADED)
   validationErrors     Json?
-  targetColumn         String?
-  sensitiveColumns     String[]
+  targetColumn         String?       @db.Text
+  sensitiveColumns     Json          @default("[]")
   /// Aggregate profile (statistics, correlations); never contains raw rows.
   profile              Json?
   isSynthetic          Boolean       @default(false)
@@ -800,8 +808,8 @@ model Dataset {
   deletedAt            DateTime?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
-  createdById          String?       @db.Uuid
-  updatedById          String?       @db.Uuid
+  createdById          String?       @db.Char(36)
+  updatedById          String?       @db.Char(36)
 
   owner         User            @relation(fields: [ownerId], references: [id])
   columns       DatasetColumn[]
@@ -815,9 +823,9 @@ model Dataset {
 }
 
 model DatasetColumn {
-  id           String         @id @default(uuid()) @db.Uuid
-  datasetId    String         @db.Uuid
-  name         String
+  id           String         @id @default(uuid()) @db.Char(36)
+  datasetId    String         @db.Char(36)
+  name         String         @db.VarChar(255)
   position     Int
   dataType     ColumnDataType
   isSensitive  Boolean        @default(false)
@@ -835,26 +843,26 @@ model DatasetColumn {
 
 /// Model registry entry ("Model" in the product vocabulary).
 model AIModel {
-  id                   String              @id @default(uuid()) @db.Uuid
-  name                 String
-  description          String?
-  purpose              String
-  ownerId              String              @db.Uuid
-  aiSystemId           String?             @db.Uuid
-  framework            String
-  algorithm            String
-  trainingDatasetId    String?             @db.Uuid
+  id                   String              @id @default(uuid()) @db.Char(36)
+  name                 String              @db.Text
+  description          String?             @db.Text
+  purpose              String              @db.Text
+  ownerId              String              @db.Char(36)
+  aiSystemId           String?             @db.Char(36)
+  framework            String              @db.Text
+  algorithm            String              @db.Text
+  trainingDatasetId    String?             @db.Char(36)
   riskLevel            RiskLevel?
   fairnessStatus       EvaluationStatus    @default(NOT_ASSESSED)
   securityStatus       EvaluationStatus    @default(NOT_ASSESSED)
   explainabilityStatus EvaluationStatus    @default(NOT_ASSESSED)
   lifecycleStage       ModelLifecycleStage @default(DEVELOPMENT)
   nextReviewAt         DateTime?
-  tags                 String[]
+  tags                 Json                @default("[]")
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
-  createdById          String?             @db.Uuid
-  updatedById          String?             @db.Uuid
+  createdById          String?             @db.Char(36)
+  updatedById          String?             @db.Char(36)
 
   owner            User              @relation(fields: [ownerId], references: [id])
   aiSystem         AISystem?         @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
@@ -873,29 +881,29 @@ model AIModel {
 }
 
 model ModelVersion {
-  id                   String   @id @default(uuid()) @db.Uuid
-  modelId              String   @db.Uuid
-  version              String
-  description          String?
+  id                   String   @id @default(uuid()) @db.Char(36)
+  modelId              String   @db.Char(36)
+  version              String   @db.VarChar(255)
+  description          String?  @db.Text
   /// Opaque artifact kept for export/download only; the platform never deserialises model files.
-  artifactKey          String?
-  artifactChecksum     String?
-  artifactFormat       String?
+  artifactKey          String?  @db.Text
+  artifactChecksum     String?  @db.Text
+  artifactFormat       String?  @db.Text
   artifactSizeBytes    Int?
   /// Populated only from real evaluation runs.
   metrics              Json?
   /// Full model spec (algorithm, hyperparameters, split) used to rebuild the model deterministically.
   parameters           Json?
-  featureColumns       String[]
-  targetColumn         String?
+  featureColumns       Json     @default("[]")
+  targetColumn         String?  @db.Text
   randomSeed           Int?
-  datasetId            String?  @db.Uuid
+  datasetId            String?  @db.Char(36)
   /// Hash of test-set predictions; a rebuild with a different fingerprint is flagged as non-identical.
-  fingerprint          String?
-  trainingExperimentId String?  @db.Uuid
+  fingerprint          String?  @db.Text
+  trainingExperimentId String?  @db.Char(36)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
-  createdById          String?  @db.Uuid
+  createdById          String?  @db.Char(36)
 
   model              AIModel      @relation(fields: [modelId], references: [id], onDelete: Cascade)
   dataset            Dataset?     @relation(fields: [datasetId], references: [id], onDelete: SetNull)
@@ -908,22 +916,22 @@ model ModelVersion {
 }
 
 model Experiment {
-  id             String           @id @default(uuid()) @db.Uuid
-  name           String?
+  id             String           @id @default(uuid()) @db.Char(36)
+  name           String?          @db.Text
   type           ExperimentType
   status         ExperimentStatus @default(QUEUED)
-  userId         String           @db.Uuid
-  datasetId      String?          @db.Uuid
-  modelVersionId String?          @db.Uuid
-  algorithm      String?
+  userId         String           @db.Char(36)
+  datasetId      String?          @db.Char(36)
+  modelVersionId String?          @db.Char(36)
+  algorithm      String?          @db.Text
   parameters     Json
   /// Seed + config hash make every run reproducible.
   randomSeed     Int
-  configHash     String
-  jobId          String?
+  configHash     String           @db.Text
+  jobId          String?          @db.Text
   progress       Int              @default(0)
   logs           Json?
-  error          String?
+  error          String?          @db.Text
   /// Experiments are educational simulations unless explicitly flagged otherwise.
   isEducational  Boolean          @default(true)
   startedAt      DateTime?
@@ -948,10 +956,10 @@ model Experiment {
 }
 
 model ExperimentResult {
-  id           String   @id @default(uuid()) @db.Uuid
-  experimentId String   @db.Uuid
+  id           String   @id @default(uuid()) @db.Char(36)
+  experimentId String   @db.Char(36)
   /// e.g. "metrics", "shap_global", "lime_local", "fairness_by_group", "fgsm"
-  kind         String
+  kind         String   @db.VarChar(255)
   metrics      Json?
   data         Json
   /// [{ name, storageKey, mimeType }]
@@ -969,22 +977,22 @@ model ExperimentResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model ModelCard {
-  id            String          @id @default(uuid()) @db.Uuid
-  modelId       String?         @db.Uuid
-  name          String
-  version       String
+  id            String          @id @default(uuid()) @db.Char(36)
+  modelId       String?         @db.Char(36)
+  name          String          @db.Text
+  version       String          @db.Text
   status        ModelCardStatus @default(DRAFT)
   /// Structured card fields (intended use, metrics, fairness, limitations, ...).
   content       Json
   /// Previous version of this card (version lineage).
-  parentCardId  String?         @db.Uuid
-  ownerId       String          @db.Uuid
+  parentCardId  String?         @db.Char(36)
+  ownerId       String          @db.Char(36)
   publishedAt   DateTime?
-  publishedById String?         @db.Uuid
+  publishedById String?         @db.Char(36)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
-  createdById   String?         @db.Uuid
-  updatedById   String?         @db.Uuid
+  createdById   String?         @db.Char(36)
+  updatedById   String?         @db.Char(36)
 
   model      AIModel?    @relation(fields: [modelId], references: [id], onDelete: SetNull)
   owner      User        @relation(fields: [ownerId], references: [id])
@@ -998,30 +1006,30 @@ model ModelCard {
 }
 
 model RiskAssessment {
-  id                       String       @id @default(uuid()) @db.Uuid
-  title                    String
-  aiSystemId               String?      @db.Uuid
-  modelId                  String?      @db.Uuid
-  assessorId               String       @db.Uuid
+  id                       String       @id @default(uuid()) @db.Char(36)
+  title                    String       @db.Text
+  aiSystemId               String?      @db.Char(36)
+  modelId                  String?      @db.Char(36)
+  assessorId               String       @db.Char(36)
   /// Raw wizard answers.
   answers                  Json
   score                    Int?
   riskLevel                RiskLevel?
   riskFactors              Json?
   recommendedControls      Json?
-  requiredOversight        String?
+  requiredOversight        String?      @db.Text
   /// "Potential compliance considerations" - never a compliance determination.
   complianceConsiderations Json?
-  scoringVersion           String
+  scoringVersion           String       @db.Text
   status                   ReviewStatus @default(DRAFT)
-  reviewerId               String?      @db.Uuid
-  reviewComment            String?
+  reviewerId               String?      @db.Char(36)
+  reviewComment            String?      @db.Text
   submittedAt              DateTime?
   reviewedAt               DateTime?
   createdAt                DateTime     @default(now())
   updatedAt                DateTime     @updatedAt
-  createdById              String?      @db.Uuid
-  updatedById              String?      @db.Uuid
+  createdById              String?      @db.Char(36)
+  updatedById              String?      @db.Char(36)
 
   aiSystem AISystem? @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
   model    AIModel?  @relation(fields: [modelId], references: [id], onDelete: SetNull)
@@ -1035,22 +1043,22 @@ model RiskAssessment {
 }
 
 model AlgorithmicImpactAssessment {
-  id           String       @id @default(uuid()) @db.Uuid
-  title        String
-  aiSystemId   String?      @db.Uuid
-  ownerId      String       @db.Uuid
+  id           String       @id @default(uuid()) @db.Char(36)
+  title        String       @db.Text
+  aiSystemId   String?      @db.Char(36)
+  ownerId      String       @db.Char(36)
   version      Int          @default(1)
   status       ReviewStatus @default(DRAFT)
   /// Keyed by section: systemInformation, purpose, stakeholders, ...
   sections     Json
   submittedAt  DateTime?
   approvedAt   DateTime?
-  approvedById String?      @db.Uuid
+  approvedById String?      @db.Char(36)
   retiredAt    DateTime?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
-  createdById  String?      @db.Uuid
-  updatedById  String?      @db.Uuid
+  createdById  String?      @db.Char(36)
+  updatedById  String?      @db.Char(36)
 
   aiSystem AISystem?          @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
   owner    User               @relation(fields: [ownerId], references: [id])
@@ -1062,12 +1070,12 @@ model AlgorithmicImpactAssessment {
 }
 
 model AIAStatusHistory {
-  id           String        @id @default(uuid()) @db.Uuid
-  assessmentId String        @db.Uuid
+  id           String        @id @default(uuid()) @db.Char(36)
+  assessmentId String        @db.Char(36)
   fromStatus   ReviewStatus?
   toStatus     ReviewStatus
-  actorId      String        @db.Uuid
-  comment      String?
+  actorId      String        @db.Char(36)
+  comment      String?       @db.Text
   /// Full snapshot of the sections at the time of the transition.
   snapshot     Json?
   createdAt    DateTime      @default(now())
@@ -1083,25 +1091,25 @@ model AIAStatusHistory {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model AISystem {
-  id             String         @id @default(uuid()) @db.Uuid
-  name           String
-  description    String
-  businessUnit   String?
-  ownerId        String         @db.Uuid
+  id             String         @id @default(uuid()) @db.Char(36)
+  name           String         @db.Text
+  description    String         @db.Text
+  businessUnit   String?        @db.Text
+  ownerId        String         @db.Char(36)
   status         AISystemStatus @default(PROPOSED)
   riskLevel      RiskLevel?
   isThirdParty   Boolean        @default(false)
-  vendorName     String?
+  vendorName     String?        @db.Text
   /// Unsanctioned AI usage discovered in the organisation (Shadow AI register).
   isShadowAI     Boolean        @default(false)
-  discoveredVia  String?
-  dataCategories String[]
+  discoveredVia  String?        @db.Text
+  dataCategories Json           @default("[]")
   lastReviewedAt DateTime?
   nextReviewAt   DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
-  createdById    String?        @db.Uuid
-  updatedById    String?        @db.Uuid
+  createdById    String?        @db.Char(36)
+  updatedById    String?        @db.Char(36)
 
   owner             User                          @relation(fields: [ownerId], references: [id])
   models            AIModel[]
@@ -1119,24 +1127,24 @@ model AISystem {
 }
 
 model GovernancePolicy {
-  id            String       @id @default(uuid()) @db.Uuid
-  title         String
-  slug          String       @unique
-  category      String
-  summary       String
+  id            String       @id @default(uuid()) @db.Char(36)
+  title         String       @db.Text
+  slug          String       @unique @db.VarChar(255)
+  category      String       @db.VarChar(255)
+  summary       String       @db.Text
   /// Markdown body.
-  content       String
-  version       String       @default("1.0")
+  content       String       @db.Text
+  version       String       @default("1.0") @db.VarChar(255)
   status        PolicyStatus @default(DRAFT)
   effectiveDate DateTime?
   reviewDate    DateTime?
-  ownerId       String       @db.Uuid
-  approvedById  String?      @db.Uuid
+  ownerId       String       @db.Char(36)
+  approvedById  String?      @db.Char(36)
   approvedAt    DateTime?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
-  createdById   String?      @db.Uuid
-  updatedById   String?      @db.Uuid
+  createdById   String?      @db.Char(36)
+  updatedById   String?      @db.Char(36)
 
   owner User @relation(fields: [ownerId], references: [id])
 
@@ -1146,25 +1154,25 @@ model GovernancePolicy {
 }
 
 model AIIncident {
-  id                String           @id @default(uuid()) @db.Uuid
-  title             String
-  description       String
+  id                String           @id @default(uuid()) @db.Char(36)
+  title             String           @db.Text
+  description       String           @db.Text
   severity          IncidentSeverity
   status            IncidentStatus   @default(OPEN)
-  aiSystemId        String?          @db.Uuid
-  modelId           String?          @db.Uuid
-  reportedById      String           @db.Uuid
-  assignedToId      String?          @db.Uuid
+  aiSystemId        String?          @db.Char(36)
+  modelId           String?          @db.Char(36)
+  reportedById      String           @db.Char(36)
+  assignedToId      String?          @db.Char(36)
   occurredAt        DateTime?
   detectedAt        DateTime         @default(now())
   resolvedAt        DateTime?
-  impact            String?
-  rootCause         String?
-  correctiveActions String?
+  impact            String?          @db.Text
+  rootCause         String?          @db.Text
+  correctiveActions String?          @db.Text
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
-  createdById       String?          @db.Uuid
-  updatedById       String?          @db.Uuid
+  createdById       String?          @db.Char(36)
+  updatedById       String?          @db.Char(36)
 
   aiSystem   AISystem? @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
   model      AIModel?  @relation(fields: [modelId], references: [id], onDelete: SetNull)
@@ -1177,25 +1185,25 @@ model AIIncident {
 }
 
 model RiskRegisterEntry {
-  id            String          @id @default(uuid()) @db.Uuid
-  title         String
-  description   String
-  category      String
-  aiSystemId    String?         @db.Uuid
+  id            String          @id @default(uuid()) @db.Char(36)
+  title         String          @db.Text
+  description   String          @db.Text
+  category      String          @db.Text
+  aiSystemId    String?         @db.Char(36)
   /// 1 (rare) .. 5 (almost certain)
   likelihood    Int
   /// 1 (negligible) .. 5 (severe)
   impact        Int
   inherentScore Int
   residualScore Int?
-  mitigation    String?
+  mitigation    String?         @db.Text
   status        RiskEntryStatus @default(OPEN)
-  ownerId       String?         @db.Uuid
+  ownerId       String?         @db.Char(36)
   reviewDate    DateTime?
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
-  createdById   String?         @db.Uuid
-  updatedById   String?         @db.Uuid
+  createdById   String?         @db.Char(36)
+  updatedById   String?         @db.Char(36)
 
   aiSystem AISystem? @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
 
@@ -1205,13 +1213,13 @@ model RiskRegisterEntry {
 }
 
 model OversightRecord {
-  id                String            @id @default(uuid()) @db.Uuid
-  aiSystemId        String?           @db.Uuid
-  modelId           String?           @db.Uuid
-  decisionReference String
+  id                String            @id @default(uuid()) @db.Char(36)
+  aiSystemId        String?           @db.Char(36)
+  modelId           String?           @db.Char(36)
+  decisionReference String            @db.Text
   decision          OversightDecision
-  rationale         String
-  reviewerId        String            @db.Uuid
+  rationale         String            @db.Text
+  reviewerId        String            @db.Char(36)
   createdAt         DateTime          @default(now())
 
   aiSystem AISystem? @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
@@ -1223,15 +1231,15 @@ model OversightRecord {
 }
 
 model VendorAssessment {
-  id             String       @id @default(uuid()) @db.Uuid
-  aiSystemId     String?      @db.Uuid
-  vendorName     String
-  productName    String
+  id             String       @id @default(uuid()) @db.Char(36)
+  aiSystemId     String?      @db.Char(36)
+  vendorName     String       @db.VarChar(255)
+  productName    String       @db.Text
   riskLevel      RiskLevel?
   /// Questionnaire answers and findings.
   findings       Json
   status         ReviewStatus @default(DRAFT)
-  assessorId     String       @db.Uuid
+  assessorId     String       @db.Char(36)
   assessmentDate DateTime     @default(now())
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -1243,23 +1251,23 @@ model VendorAssessment {
 }
 
 model ComplianceRequirement {
-  id                  String           @id @default(uuid()) @db.Uuid
-  code                String           @unique
-  title               String
-  description         String
+  id                  String           @id @default(uuid()) @db.Char(36)
+  code                String           @unique @db.VarChar(255)
+  title               String           @db.Text
+  description         String           @db.Text
   /// Reference framework, e.g. "NIST AI RMF", "ISO/IEC 42001", "EU AI Act".
-  framework           String
-  category            String
+  framework           String           @db.VarChar(255)
+  category            String           @db.Text
   status              ComplianceStatus @default(NOT_STARTED)
-  evidence            String?
-  ownerId             String?          @db.Uuid
+  evidence            String?          @db.Text
+  ownerId             String?          @db.Char(36)
   requiresLegalReview Boolean          @default(true)
   lastReviewedAt      DateTime?
   nextReviewAt        DateTime?
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
-  createdById         String?          @db.Uuid
-  updatedById         String?          @db.Uuid
+  createdById         String?          @db.Char(36)
+  updatedById         String?          @db.Char(36)
 
   @@index([framework])
   @@index([status])
@@ -1267,14 +1275,14 @@ model ComplianceRequirement {
 }
 
 model ReviewSchedule {
-  id             String    @id @default(uuid()) @db.Uuid
-  resourceType   String
-  resourceId     String    @db.Uuid
-  title          String
+  id             String    @id @default(uuid()) @db.Char(36)
+  resourceType   String    @db.VarChar(255)
+  resourceId     String    @db.Char(36)
+  title          String    @db.Text
   frequencyDays  Int
   nextReviewAt   DateTime
   lastReviewedAt DateTime?
-  assigneeId     String?   @db.Uuid
+  assigneeId     String?   @db.Char(36)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -1284,14 +1292,14 @@ model ReviewSchedule {
 }
 
 model ApprovalRequest {
-  id            String         @id @default(uuid()) @db.Uuid
-  resourceType  String
-  resourceId    String         @db.Uuid
-  title         String
-  requestedById String         @db.Uuid
-  approverId    String?        @db.Uuid
+  id            String         @id @default(uuid()) @db.Char(36)
+  resourceType  String         @db.VarChar(255)
+  resourceId    String         @db.Char(36)
+  title         String         @db.Text
+  requestedById String         @db.Char(36)
+  approverId    String?        @db.Char(36)
   status        ApprovalStatus @default(PENDING)
-  comment       String?
+  comment       String?        @db.Text
   decidedAt     DateTime?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -1308,21 +1316,21 @@ model ApprovalRequest {
 /// Append-only. UPDATE / DELETE / TRUNCATE are rejected by a database trigger
 /// (see migration `audit_log_immutability`).
 model AuditLog {
-  id         String        @id @default(uuid()) @db.Uuid
-  userId     String?       @db.Uuid
+  id         String        @id @default(uuid()) @db.Char(36)
+  userId     String?       @db.Char(36)
   /// Snapshot of the actor at the time of the event.
-  userEmail  String?
+  userEmail  String?       @db.Text
   role       RoleName?
-  action     String
-  resource   String
-  resourceId String?
-  ipAddress  String?
-  userAgent  String?
-  requestId  String?
+  action     String        @db.VarChar(255)
+  resource   String        @db.VarChar(255)
+  resourceId String?       @db.VarChar(255)
+  ipAddress  String?       @db.Text
+  userAgent  String?       @db.Text
+  requestId  String?       @db.Text
   before     Json?
   after      Json?
   result     AuditResult   @default(SUCCESS)
-  reason     String?
+  reason     String?       @db.Text
   severity   AuditSeverity @default(INFO)
   metadata   Json?
   createdAt  DateTime      @default(now())
@@ -1339,12 +1347,12 @@ model AuditLog {
 }
 
 model Notification {
-  id        String           @id @default(uuid()) @db.Uuid
-  userId    String           @db.Uuid
+  id        String           @id @default(uuid()) @db.Char(36)
+  userId    String           @db.Char(36)
   type      NotificationType
-  title     String
-  message   String
-  link      String?
+  title     String           @db.Text
+  message   String           @db.Text
+  link      String?          @db.Text
   metadata  Json?
   readAt    DateTime?
   createdAt DateTime         @default(now())
@@ -1357,11 +1365,11 @@ model Notification {
 }
 
 model SystemSetting {
-  key         String   @id
+  key         String   @id @db.VarChar(255)
   value       Json
-  description String?
+  description String?  @db.Text
   updatedAt   DateTime @updatedAt
-  updatedById String?  @db.Uuid
+  updatedById String?  @db.Char(36)
 
   @@map("system_settings")
 }

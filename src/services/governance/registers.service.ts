@@ -42,7 +42,7 @@ export const riskRegisterService = {
       status: q.status,
       category: q.category,
       aiSystemId: q.aiSystemId,
-      title: q.search ? { contains: q.search, mode: 'insensitive' } : undefined,
+      title: q.search ? { contains: q.search } : undefined,
     };
     const [rows, total] = await Promise.all([
       prisma.riskRegisterEntry.findMany({ where, include: { aiSystem: { select: { id: true, name: true } } }, orderBy: [{ inherentScore: 'desc' }, { updatedAt: 'desc' }], ...toSkipTake(q) }),
@@ -106,7 +106,7 @@ export const complianceService = {
     const where: Prisma.ComplianceRequirementWhereInput = {
       framework: q.framework,
       status: q.status,
-      OR: q.search ? [{ title: { contains: q.search, mode: 'insensitive' } }, { code: { contains: q.search, mode: 'insensitive' } }] : undefined,
+      OR: q.search ? [{ title: { contains: q.search } }, { code: { contains: q.search } }] : undefined,
     };
     const [rows, total, frameworks] = await Promise.all([
       prisma.complianceRequirement.findMany({ where, orderBy: [{ framework: 'asc' }, { code: 'asc' }], ...toSkipTake(q) }),
@@ -167,7 +167,7 @@ export const vendorService = {
   async list(q: ListVendorsQuery) {
     const where: Prisma.VendorAssessmentWhereInput = {
       status: q.status,
-      OR: q.search ? [{ vendorName: { contains: q.search, mode: 'insensitive' } }, { productName: { contains: q.search, mode: 'insensitive' } }] : undefined,
+      OR: q.search ? [{ vendorName: { contains: q.search } }, { productName: { contains: q.search } }] : undefined,
     };
     const [rows, total] = await Promise.all([
       prisma.vendorAssessment.findMany({ where, include: { aiSystem: { select: { id: true, name: true } } }, orderBy: { assessmentDate: 'desc' }, ...toSkipTake(q) }),

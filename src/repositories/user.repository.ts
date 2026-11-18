@@ -17,9 +17,9 @@ function buildWhere(filter: Omit<UserListFilter, 'skip' | 'take'>): Prisma.UserW
   if (filter.role) where.role = { name: filter.role };
   if (filter.search) {
     where.OR = [
-      { email: { contains: filter.search, mode: 'insensitive' } },
-      { firstName: { contains: filter.search, mode: 'insensitive' } },
-      { lastName: { contains: filter.search, mode: 'insensitive' } },
+      { email: { contains: filter.search } },
+      { firstName: { contains: filter.search } },
+      { lastName: { contains: filter.search } },
     ];
   }
   return where;

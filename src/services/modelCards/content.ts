@@ -1,6 +1,7 @@
 import type { ExperimentType, ModelCard, Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import { Errors } from '../../utils/errors';
+import { stringList } from '../../utils/jsonList';
 import type { ModelCardContent } from '../../validators/modelCard.validators';
 import type { ReportDocument } from '../reports/document';
 
@@ -110,14 +111,15 @@ export async function prefill(modelId: string, versionId?: string) {
 
   if (version.dataset) {
     const d = version.dataset;
+    const features = stringList(version.featureColumns);
     content.trainingData = [
       `${d.name}: ${d.rowCount ?? '?'} rows, ${d.columnCount ?? '?'} columns (SHA-256 ${d.checksumSha256?.slice(0, 12) ?? 'n/a'}…).`,
       version.targetColumn ? `Target: ${version.targetColumn}.` : '',
-      version.featureColumns.length ? `Features: ${version.featureColumns.join(', ')}.` : '',
+      features.length ? `Features: ${features.join(', ')}.` : '',
     ]
       .filter(Boolean)
       .join(' ');
-    content.evaluatedSubgroups = d.sensitiveColumns;
+    content.evaluatedSubgroups = stringList(d.sensitiveColumns);
     sources.trainingData = 'Training dataset';
     sources.evaluatedSubgroups = 'Dataset sensitive columns';
   }

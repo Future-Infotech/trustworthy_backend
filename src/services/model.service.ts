@@ -7,6 +7,7 @@ import type { AuthContext } from '../middleware/authorize';
 import { PERMISSIONS } from '../rbac/permissions';
 import { sha256 } from '../utils/crypto';
 import { AppError, Errors } from '../utils/errors';
+import { stringList } from '../utils/jsonList';
 import { paginate, toSkipTake } from '../utils/pagination';
 import type { CreateModelInput, CreateVersionInput, LifecycleInput, ListModelsQuery, UpdateModelInput } from '../validators/asset.validators';
 import { auditService, type AuditActor } from './audit.service';
@@ -119,11 +120,14 @@ async function transitionBlockers(model: Prisma.AIModelGetPayload<object>, to: M
 
 export const modelService = {
   async list(auth: AuthContext, query: ListModelsQuery) {
+    // Tags are a JSON list (MariaDB cannot filter inside it), so resolve exact tag matches in code.
+    const search = query.search?.trim().toLowerCase();
+    const taggedIds = search ? (await prisma.aIModel.findMany({ select: { id: true, tags: true } })).filter((m) => stringList(m.tags).some((t) => t.toLowerCase() === search)).map((m) => m.id) : [];
     const where: Prisma.AIModelWhereInput = {
       ...(query.mine && { ownerId: auth.actor.id }),
       ...(query.lifecycleStage && { lifecycleStage: query.lifecycleStage }),
       ...(query.riskLevel && { riskLevel: query.riskLevel }),
-      ...(query.search && { OR: [{ name: { contains: query.search, mode: 'insensitive' } }, { purpose: { contains: query.search, mode: 'insensitive' } }, { tags: { has: query.search } }] }),
+      ...(query.search && { OR: [{ name: { contains: query.search } }, { purpose: { contains: query.search } }, { id: { in: taggedIds } }] }),
     };
     const [rows, total] = await prisma.$transaction([
       prisma.aIModel.findMany({ where, select: summarySelect, orderBy: { updatedAt: 'desc' }, ...toSkipTake(query) }),

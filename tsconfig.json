@@ -18,5 +18,5 @@
     "sourceMap": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src", "tests", "vitest.config.mts", "../prisma/seed.ts", "../prisma/seed-data"]
+  "include": ["src", "tests", "vitest.config.mts", "prisma/seed.ts", "prisma/seed-data"]
 }

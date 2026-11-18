@@ -99,8 +99,8 @@ export const courseService = {
     else if (query.status) where.status = query.status;
     if (query.search) {
       where.OR = [
-        { title: { contains: query.search, mode: 'insensitive' } },
-        { summary: { contains: query.search, mode: 'insensitive' } },
+        { title: { contains: query.search } },
+        { summary: { contains: query.search } },
       ];
     }
     if (query.enrolled !== undefined) {
@@ -326,6 +326,7 @@ export const courseService = {
         data: {
           ...input,
           media: json(input.media),
+          slides: json(input.slides),
           knowledgeCheck: json(input.knowledgeCheck),
           moduleId,
           order: (last._max.order ?? 0) + 1,
@@ -349,6 +350,7 @@ export const courseService = {
       data: {
         ...input,
         media: input.media === null ? (null as unknown as Prisma.InputJsonValue) : json(input.media),
+        slides: input.slides === null ? (null as unknown as Prisma.InputJsonValue) : json(input.slides),
         knowledgeCheck: input.knowledgeCheck === null ? (null as unknown as Prisma.InputJsonValue) : json(input.knowledgeCheck),
         updatedById: auth.actor.id,
       },
@@ -445,12 +447,19 @@ export const courseService = {
       codeSnippet: lesson.codeSnippet,
       codeLanguage: lesson.codeLanguage,
       videoUrl: lesson.videoUrl,
+      slides: lesson.slides,
+      slidesUrl: lesson.slidesUrl,
       estimatedMinutes: lesson.estimatedMinutes,
       order: lesson.order,
       knowledgeCheck: manager ? lesson.knowledgeCheck : publicKnowledgeCheck(lesson.knowledgeCheck),
       module: { id: lesson.module.id, title: lesson.module.title, order: lesson.module.order },
       course: { id: courseId, title: lesson.module.course.title },
-      progress: progress && { status: progress.status, timeSpentSeconds: progress.timeSpentSeconds, completedAt: progress.completedAt },
+      progress: progress && {
+        status: progress.status,
+        timeSpentSeconds: progress.timeSpentSeconds,
+        lastPosition: progress.lastPosition,
+        completedAt: progress.completedAt,
+      },
       navigation: {
         position: position + 1,
         total: allLessons.length,
@@ -460,7 +469,7 @@ export const courseService = {
     };
   },
 
-  async recordProgress(auth: AuthContext, lessonId: string, input: { timeSpentSeconds: number; completed?: boolean }) {
+  async recordProgress(auth: AuthContext, lessonId: string, input: { timeSpentSeconds: number; completed?: boolean; position?: number }) {
     const lesson = await prisma.lesson.findUnique({ where: { id: lessonId }, include: { module: { select: { courseId: true } } } });
     if (!lesson) throw Errors.notFound('Lesson');
     const courseId = lesson.module.courseId;
@@ -479,18 +488,26 @@ export const courseService = {
           moduleId: lesson.moduleId,
           status,
           timeSpentSeconds: input.timeSpentSeconds,
+          lastPosition: input.position ?? 0,
           completedAt: status === 'COMPLETED' ? new Date() : null,
         },
         update: {
           status,
           timeSpentSeconds: { increment: input.timeSpentSeconds },
+          ...(input.position !== undefined ? { lastPosition: input.position } : {}),
           lastAccessedAt: new Date(),
           ...(completing ? { completedAt: new Date() } : {}),
         },
       });
       const updatedEnrollment = completing ? await recomputeEnrollment(auth.actor.id, courseId, tx) : enrollment;
       return {
-        progress: { lessonId, status: progress.status, timeSpentSeconds: progress.timeSpentSeconds, completedAt: progress.completedAt },
+        progress: {
+          lessonId,
+          status: progress.status,
+          timeSpentSeconds: progress.timeSpentSeconds,
+          lastPosition: progress.lastPosition,
+          completedAt: progress.completedAt,
+        },
         enrollment: updatedEnrollment && { status: updatedEnrollment.status, progressPercent: updatedEnrollment.progressPercent },
       };
     });

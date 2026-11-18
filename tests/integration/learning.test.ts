@@ -172,6 +172,114 @@ async function buildQuiz(auth: Record<string, string>, opts: Record<string, unkn
   return { quizId: quiz.body.id as string, questionIds: ids };
 }
 
+describe('video and slide lessons', () => {
+  // Minimal valid file signatures; the content after them is irrelevant to the checks.
+  const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(40, 1)]);
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32, 2)]);
+  const PDF = Buffer.from('%PDF-1.4\n%fake\n');
+
+  it('stores slide decks and video, and remembers each learner\'s resume position', async () => {
+    const faculty = await loginAs('FACULTY');
+    const student = await loginAs('STUDENT');
+    const { courseId, moduleId } = await buildCourse(faculty.auth, 1);
+    const deck = await request(app)
+      .post(`/api/modules/${moduleId}/lessons`)
+      .set(faculty.auth)
+      .send({
+        title: 'Slides',
+        type: 'SLIDES',
+        slides: [{ url: '/samples/slides/slide-1.png', title: 'One', notes: 'Say hello' }, { url: 'https://cdn.example.com/two.png' }],
+        slidesUrl: '/api/course-media/00000000-0000-0000-0000-000000000000.pdf',
+      })
+      .expect(201);
+    const video = await request(app)
+      .post(`/api/modules/${moduleId}/lessons`)
+      .set(faculty.auth)
+      .send({ title: 'Video', type: 'VIDEO', videoUrl: 'https://www.youtube.com/watch?v=abc123' })
+      .expect(201);
+    await request(app).patch(`/api/courses/${courseId}`).set(faculty.auth).send({ status: 'PUBLISHED' }).expect(200);
+    await request(app).post(`/api/courses/${courseId}/enroll`).set(student.auth).expect(201);
+
+    const first = await request(app).get(`/api/lessons/${deck.body.id}`).set(student.auth).expect(200);
+    expect(first.body).toMatchObject({ type: 'SLIDES', slidesUrl: expect.stringContaining('/api/course-media/') });
+    expect(first.body.slides).toHaveLength(2);
+    expect(first.body.progress.lastPosition).toBe(0);
+
+    await request(app).post(`/api/lessons/${deck.body.id}/progress`).set(student.auth).send({ timeSpentSeconds: 20, position: 1 }).expect(200);
+    const resumed = await request(app).get(`/api/lessons/${deck.body.id}`).set(student.auth).expect(200);
+    expect(resumed.body.progress).toMatchObject({ lastPosition: 1, status: 'IN_PROGRESS' });
+
+    // A progress ping without a position must not reset the resume point.
+    await request(app).post(`/api/lessons/${deck.body.id}/progress`).set(student.auth).send({ timeSpentSeconds: 5 }).expect(200);
+    const kept = await request(app).get(`/api/lessons/${deck.body.id}`).set(student.auth).expect(200);
+    expect(kept.body.progress.lastPosition).toBe(1);
+
+    await request(app).post(`/api/lessons/${video.body.id}/progress`).set(student.auth).send({ timeSpentSeconds: 30, position: 95 }).expect(200);
+    const other = await request(app).get(`/api/lessons/${video.body.id}`).set(student.auth).expect(200);
+    expect(other.body.progress.lastPosition).toBe(95);
+  });
+
+  it('rejects unsafe media URLs and unknown lesson shapes', async () => {
+    const faculty = await loginAs('FACULTY');
+    const { moduleId } = await buildCourse(faculty.auth, 1);
+    const post = (body: object) => request(app).post(`/api/modules/${moduleId}/lessons`).set(faculty.auth).send({ title: 'x', ...body });
+    await post({ type: 'VIDEO', videoUrl: 'http://insecure.example.com/v.mp4' }).expect(400);
+    await post({ type: 'VIDEO', videoUrl: 'javascript:alert(1)' }).expect(400);
+    await post({ type: 'SLIDES', slides: [{ url: '//evil.example.com/a.png' }] }).expect(400);
+    await post({ type: 'SLIDES', slidesUrl: '/api/course-media/../../etc/passwd' }).expect(400);
+    await post({ type: 'SLIDES', slides: [{ url: '/samples/../secret.png' }] }).expect(400);
+    await post({ type: 'SLIDES', slides: [] }).expect(201);
+  });
+
+  it('accepts only inert media types, checks file signatures and serves byte ranges', async () => {
+    const faculty = await loginAs('FACULTY');
+    const student = await loginAs('STUDENT');
+
+    await request(app).post('/api/courses/media').set(student.auth).attach('file', MP4, 'a.mp4').expect(403);
+    await request(app).post('/api/courses/media').set(faculty.auth).expect(400);
+    // A script renamed to .png is rejected by its signature, as is SVG.
+    await request(app).post('/api/courses/media').set(faculty.auth).attach('file', Buffer.from('<script>alert(1)</script>'), 'x.png').expect(400);
+    await request(app).post('/api/courses/media').set(faculty.auth).attach('file', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), 'x.svg').expect(400);
+
+    const video = await request(app).post('/api/courses/media').set(faculty.auth).attach('file', MP4, 'intro.mp4').expect(201);
+    expect(video.body).toMatchObject({ kind: 'video', contentType: 'video/mp4', sizeBytes: MP4.length });
+    expect(video.body.url).toMatch(/^\/api\/course-media\/[0-9a-f-]{36}\.mp4$/);
+    expect(await latestAudit({ action: 'course.media.upload', resourceId: video.body.url.split('/').pop() })).not.toBeNull();
+
+    // Players cannot send bearer tokens, so the unguessable URL is fetchable without one.
+    const full = await request(app).get(video.body.url).buffer(true).parse((res, cb) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+    expect(full.status).toBe(200);
+    expect(full.headers['content-type']).toBe('video/mp4');
+    expect(full.headers['accept-ranges']).toBe('bytes');
+    expect(full.headers['x-content-type-options']).toBe('nosniff');
+    expect(full.body.equals(MP4)).toBe(true);
+
+    const partial = await request(app).get(video.body.url).set('Range', 'bytes=0-9').buffer(true).parse((res, cb) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+    expect(partial.status).toBe(206);
+    expect(partial.headers['content-range']).toBe(`bytes 0-9/${MP4.length}`);
+    expect(partial.body.equals(MP4.subarray(0, 10))).toBe(true);
+    await request(app).get(video.body.url).set('Range', `bytes=${MP4.length + 5}-`).expect(416);
+
+    const png = await request(app).post('/api/courses/media').set(faculty.auth).attach('file', PNG, 's.png').expect(201);
+    expect(png.body.kind).toBe('image');
+    const pdf = await request(app).post('/api/courses/media').set(faculty.auth).attach('file', PDF, 'deck.pdf').expect(201);
+    expect(pdf.body.kind).toBe('document');
+    const pdfRes = await request(app).get(pdf.body.url).expect(200);
+    expect(pdfRes.headers['content-security-policy']).toContain("frame-ancestors 'self'");
+
+    await request(app).get('/api/course-media/not-a-real-file.mp4').expect(404);
+    await request(app).get('/api/course-media/00000000-0000-0000-0000-000000000000.mp4').expect(404);
+  });
+});
+
 describe('quizzes', () => {
   it('validates question definitions', async () => {
     const faculty = await loginAs('FACULTY');

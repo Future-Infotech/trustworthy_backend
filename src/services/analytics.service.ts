@@ -44,9 +44,9 @@ async function auditEventsByDay(days: number) {
   const since = new Date(Date.now() - (days - 1) * DAY_MS);
   since.setUTCHours(0, 0, 0, 0);
   const rows = await prisma.$queryRaw<{ day: Date; result: string; count: bigint }[]>`
-    SELECT date_trunc('day', "createdAt") AS day, "result"::text AS result, COUNT(*)::bigint AS count
-    FROM "audit_logs"
-    WHERE "createdAt" >= ${since}
+    SELECT DATE(createdAt) AS day, result AS result, COUNT(*) AS count
+    FROM audit_logs
+    WHERE createdAt >= ${since}
     GROUP BY 1, 2
     ORDER BY 1`;
   const series: { date: string; success: number; failure: number; denied: number }[] = [];

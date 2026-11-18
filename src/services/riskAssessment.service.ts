@@ -111,7 +111,7 @@ export const riskAssessmentService = {
       riskLevel: q.riskLevel,
       aiSystemId: q.aiSystemId,
       assessorId: q.mine ? auth.actor.id : undefined,
-      title: q.search ? { contains: q.search, mode: 'insensitive' } : undefined,
+      title: q.search ? { contains: q.search } : undefined,
     };
     const [rows, total] = await Promise.all([
       prisma.riskAssessment.findMany({ where, include, orderBy: { updatedAt: 'desc' }, ...toSkipTake(q) }),

@@ -5,6 +5,7 @@ import type { AuthContext } from '../../middleware/authorize';
 import { PERMISSIONS } from '../../rbac/permissions';
 import { sha256 } from '../../utils/crypto';
 import { AppError, Errors } from '../../utils/errors';
+import { stringList } from '../../utils/jsonList';
 import { permissionService } from '../permission.service';
 import { settingsService } from '../settings.service';
 import { getStorage } from '../storage';
@@ -69,7 +70,7 @@ export async function maskedColumnsFor(datasetId: string, userId: string): Promi
   ]);
   if (!dataset || !enabled || dataset.ownerId === userId) return [];
   const granted = user ? await permissionService.forRole(user.role.name) : new Set<string>();
-  return granted.has(PERMISSIONS.DATASETS_MANAGE) ? [] : dataset.sensitiveColumns;
+  return granted.has(PERMISSIONS.DATASETS_MANAGE) ? [] : stringList(dataset.sensitiveColumns);
 }
 
 function specFromJson(value: Prisma.JsonValue): ModelSpec {

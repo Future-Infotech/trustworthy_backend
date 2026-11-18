@@ -735,6 +735,34 @@ paths:
       description: 'Requires `progress:track`.'
       responses:
         '201': { $ref: '#/components/responses/Created' }
+  /courses/media:
+    post:
+      tags: [Courses]
+      summary: Upload lesson media (MP4/WebM video, PDF, or PNG/JPEG/WebP/GIF image)
+      description: 'Requires `courses:manage`. Multipart field `file`. The type is verified from the file signature; the response `url` is used as a lesson `videoUrl`, slide `url` or `slidesUrl`. Size limit: setting `uploads.maxCourseMediaMb`.'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+  /course-media/{file}:
+    parameters:
+      - { name: file, in: path, required: true, schema: { type: string, pattern: '^[a-f0-9-]{36}\.(mp4|webm|pdf|png|jpg|webp|gif)$' } }
+    get:
+      tags: [Courses]
+      summary: Stream uploaded lesson media (supports Range requests)
+      description: 'Public: the unguessable file name is the capability, because media players cannot send bearer tokens.'
+      security: []
+      responses:
+        '200': { description: The file }
+        '206': { description: Partial content for a Range request }
+        '404': { $ref: '#/components/responses/NotFound' }
   /courses/{id}/analytics:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     get:
@@ -780,7 +808,7 @@ paths:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     post:
       tags: [Courses]
-      summary: Add a lesson (text, image, video or code content; Markdown is sanitised on render)
+      summary: Add a lesson (text, image, video, slide deck or code content; Markdown is sanitised on render)
       description: 'Requires `courses:manage`.'
       requestBody: { $ref: '#/components/requestBodies/Json' }
       responses:
@@ -818,8 +846,8 @@ paths:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     post:
       tags: [Courses]
-      summary: Record lesson progress (started, completed, time spent); updates course progress
-      description: 'Requires `progress:track`.'
+      summary: Record lesson progress (started, completed, time spent, resume position); updates course progress
+      description: 'Requires `progress:track`. `position` is the video second or slide index to resume from.'
       requestBody: { $ref: '#/components/requestBodies/Json' }
       responses:
         '200': { $ref: '#/components/responses/Ok' }

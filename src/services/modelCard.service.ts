@@ -116,7 +116,7 @@ export const modelCardService = {
         query.status ? { status: query.status } : {},
         query.modelId ? { modelId: query.modelId } : {},
         query.mine ? { ownerId: auth.actor.id } : {},
-        query.search ? { name: { contains: query.search, mode: 'insensitive' } } : {},
+        query.search ? { name: { contains: query.search } } : {},
       ],
     };
     const [rows, total] = await Promise.all([

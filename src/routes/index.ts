@@ -6,6 +6,7 @@ import { auditLogRouter } from './auditLog.routes';
 import { authRouter } from './auth.routes';
 import { certificateRouter, verifyRouter } from './certificate.routes';
 import {
+  courseMediaRouter,
   courseRouter,
   labAttemptRouter,
   labRouter,
@@ -33,6 +34,7 @@ apiRouter.use('/settings', settingsRouter);
 apiRouter.use('/notifications', notificationRouter);
 
 apiRouter.use('/courses', courseRouter);
+apiRouter.use('/course-media', courseMediaRouter);
 apiRouter.use('/modules', moduleRouter);
 apiRouter.use('/lessons', lessonRouter);
 apiRouter.use('/quizzes', quizRouter);

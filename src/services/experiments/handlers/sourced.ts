@@ -2,6 +2,7 @@ import type { EvaluationStatus, ExperimentType, Prisma } from '@prisma/client';
 import { z, type ZodRawShape } from 'zod';
 import { prisma } from '../../../config/prisma';
 import type { Permission } from '../../../rbac/permissions';
+import { stringList } from '../../../utils/jsonList';
 import { applyEvaluationStatus, type EvaluationField } from '../../model.service';
 import { maskedColumnsFor } from '../sources';
 import type { CompletionContext, ExperimentHandler, PreparedExperiment } from '../types';
@@ -26,7 +27,7 @@ async function datasetContext(datasetId: string): Promise<SourceDataset> {
     where: { id: datasetId },
     select: { id: true, sensitiveColumns: true, columns: { select: { name: true }, orderBy: { position: 'asc' } } },
   });
-  return { id: dataset.id, sensitiveColumns: dataset.sensitiveColumns, columns: dataset.columns.map((c) => c.name) };
+  return { id: dataset.id, sensitiveColumns: stringList(dataset.sensitiveColumns), columns: dataset.columns.map((c) => c.name) };
 }
 
 /**

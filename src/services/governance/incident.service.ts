@@ -61,7 +61,7 @@ export const incidentService = {
       severity: q.severity,
       aiSystemId: q.aiSystemId,
       reportedById: q.mine || !seesAll(auth) ? auth.actor.id : undefined,
-      title: q.search ? { contains: q.search, mode: 'insensitive' } : undefined,
+      title: q.search ? { contains: q.search } : undefined,
     };
     const [rows, total] = await Promise.all([
       prisma.aIIncident.findMany({ where, include, orderBy: [{ detectedAt: 'desc' }], ...toSkipTake(q) }),

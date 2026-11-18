@@ -3,6 +3,7 @@ import { prisma } from '../config/prisma';
 import type { AuthContext } from '../middleware/authorize';
 import { PERMISSIONS } from '../rbac/permissions';
 import { Errors } from '../utils/errors';
+import { stringList } from '../utils/jsonList';
 import { paginate, toSkipTake } from '../utils/pagination';
 import {
   rubricCriterionSchema,
@@ -77,8 +78,16 @@ export function scoreRubric(lines: RubricLine[], scores: NonNullable<GradeSubmis
 }
 
 const isStaff = (auth: AuthContext) => auth.can(PERMISSIONS.ASSIGNMENTS_MANAGE) || auth.can(PERMISSIONS.ASSIGNMENTS_GRADE);
-const isTargeted = (a: Pick<Assignment, 'targetRoles'>, role: RoleName) => a.targetRoles.length === 0 || a.targetRoles.includes(role);
-const learnerWhere = (role: RoleName): Prisma.AssignmentWhereInput => ({ isPublished: true, OR: [{ targetRoles: { isEmpty: true } }, { targetRoles: { has: role } }] });
+const isTargeted = (a: Pick<Assignment, 'targetRoles'>, role: RoleName) => {
+  const roles = stringList(a.targetRoles);
+  return roles.length === 0 || roles.includes(role);
+};
+
+/** Ids of published assignments a learner role may see (untargeted, or targeting that role). Target roles are a JSON list, so this filters in code. */
+export async function learnerAssignmentIds(role: RoleName, courseId?: string): Promise<string[]> {
+  const rows = await prisma.assignment.findMany({ where: { isPublished: true, courseId }, select: { id: true, targetRoles: true } });
+  return rows.filter((r) => isTargeted(r, role)).map((r) => r.id);
+}
 
 const include = {
   course: { select: { id: true, title: true } },
@@ -146,12 +155,13 @@ async function assertCourseAndModule(courseId: string, moduleId: string | null |
 
 /** Tells enrolled learners in the target roles about a newly published assignment. */
 async function notifyAssigned(row: Pick<Assignment, 'id' | 'title' | 'courseId' | 'targetRoles' | 'dueDate'>, tx: Prisma.TransactionClient, excludeId: string) {
+  const targetRoles = stringList(row.targetRoles) as RoleName[];
   const learners = await tx.enrollment.findMany({
     where: {
       courseId: row.courseId,
       status: { not: 'DROPPED' },
       userId: { not: excludeId },
-      user: { status: 'ACTIVE', ...(row.targetRoles.length ? { role: { name: { in: row.targetRoles } } } : {}) },
+      user: { status: 'ACTIVE', ...(targetRoles.length ? { role: { name: { in: targetRoles } } } : {}) },
     },
     select: { userId: true },
   });
@@ -235,19 +245,26 @@ export const assignmentService = {
   async list(auth: AuthContext, q: ListAssignmentsQuery) {
     const staff = isStaff(auth);
     const where: Prisma.AssignmentWhereInput = {
-      ...(staff ? { isPublished: q.published } : learnerWhere(auth.actor.role)),
+      ...(staff ? { isPublished: q.published } : { isPublished: true, id: { in: await learnerAssignmentIds(auth.actor.role, q.courseId) } }),
       courseId: q.courseId,
-      title: q.search ? { contains: q.search, mode: 'insensitive' } : undefined,
+      title: q.search ? { contains: q.search } : undefined,
     };
-    const [rows, total] = await Promise.all([
-      prisma.assignment.findMany({
-        where,
-        include: { ...include, submissions: { where: { userId: auth.actor.id }, orderBy: { attemptNumber: 'desc' }, take: 1 } },
-        orderBy: [{ dueDate: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }],
-        ...toSkipTake(q),
-      }),
-      prisma.assignment.count({ where }),
-    ]);
+    // MySQL/MariaDB cannot order "due date ascending, undated last" in a query, so order the (small) key set in code, then load one page.
+    const keys = await prisma.assignment.findMany({ where, select: { id: true, dueDate: true, createdAt: true } });
+    keys.sort((a, b) => {
+      if (a.dueDate && b.dueDate && a.dueDate.getTime() !== b.dueDate.getTime()) return a.dueDate.getTime() - b.dueDate.getTime();
+      if (!a.dueDate !== !b.dueDate) return a.dueDate ? -1 : 1;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
+    const { skip, take } = toSkipTake(q);
+    const pageIds = keys.slice(skip, skip + take).map((k) => k.id);
+    const found = await prisma.assignment.findMany({
+      where: { id: { in: pageIds } },
+      include: { ...include, submissions: { where: { userId: auth.actor.id }, orderBy: { attemptNumber: 'desc' }, take: 1 } },
+    });
+    const byId = new Map(found.map((r) => [r.id, r]));
+    const rows = pageIds.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => !!r);
+    const total = keys.length;
     const counts = staff ? await stats(rows.map((r) => r.id)) : null;
     const now = new Date();
     const data = rows.map(({ submissions, instructions: _i, rubric: _r, ...r }) => ({

@@ -60,7 +60,7 @@ export const inventoryService = {
       isShadowAI: q.shadow,
       isThirdParty: q.thirdParty,
       OR: q.search
-        ? [{ name: { contains: q.search, mode: 'insensitive' } }, { businessUnit: { contains: q.search, mode: 'insensitive' } }, { vendorName: { contains: q.search, mode: 'insensitive' } }]
+        ? [{ name: { contains: q.search } }, { businessUnit: { contains: q.search } }, { vendorName: { contains: q.search } }]
         : undefined,
     };
     const [rows, total] = await Promise.all([

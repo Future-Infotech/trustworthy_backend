@@ -15,6 +15,25 @@ const httpsUrl = z
   .url()
   .refine((u) => u.startsWith('https://'), 'Only https:// URLs are allowed');
 
+/**
+ * Lesson media is either an https URL, a file uploaded to the platform (/api/course-media/...),
+ * or a bundled sample (/samples/...). Protocol-relative and other schemes are rejected.
+ */
+const mediaUrl = z
+  .string()
+  .trim()
+  .max(2000)
+  .refine((u) => {
+    if (u.startsWith('/api/course-media/')) return /^\/api\/course-media\/[a-zA-Z0-9-]+\.[a-z0-9]{2,5}$/.test(u);
+    if (u.startsWith('/samples/')) return /^\/samples\/[a-zA-Z0-9/_.-]+$/.test(u) && !u.includes('..');
+    if (!u.startsWith('https://')) return false;
+    try {
+      return Boolean(new URL(u).hostname);
+    } catch {
+      return false;
+    }
+  }, 'Use an https:// URL or a file uploaded to the platform');
+
 export const courseStatusEnum = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']);
 
 export const listCoursesQuery = paginationSchema.extend({
@@ -68,16 +87,22 @@ export const knowledgeCheckSchema = z
 
 export const lessonSchema = z.object({
   title: text(200),
-  type: z.enum(['TEXT', 'VIDEO', 'IMAGE', 'CODE', 'KNOWLEDGE_CHECK', 'EXERCISE']).default('TEXT'),
+  type: z.enum(['TEXT', 'VIDEO', 'SLIDES', 'IMAGE', 'CODE', 'KNOWLEDGE_CHECK', 'EXERCISE']).default('TEXT'),
   content: z.string().max(100_000).default(''),
   media: z
-    .array(z.object({ type: z.enum(['image', 'video']), url: httpsUrl, caption: optionalText(300) }))
+    .array(z.object({ type: z.enum(['image', 'video']), url: mediaUrl, caption: optionalText(300) }))
     .max(20)
     .optional()
     .nullable(),
   codeSnippet: z.string().max(20_000).optional().nullable(),
   codeLanguage: z.enum(['python', 'typescript', 'javascript', 'sql', 'bash', 'json', 'text']).optional().nullable(),
-  videoUrl: httpsUrl.optional().nullable(),
+  videoUrl: mediaUrl.optional().nullable(),
+  slides: z
+    .array(z.object({ url: mediaUrl, title: optionalText(200), notes: optionalText(2000) }))
+    .max(200)
+    .optional()
+    .nullable(),
+  slidesUrl: mediaUrl.optional().nullable(),
   knowledgeCheck: z.array(knowledgeCheckSchema).max(10).optional().nullable(),
   estimatedMinutes: z.number().int().min(1).max(600).optional().nullable(),
 });
@@ -90,6 +115,8 @@ export const lessonProgressSchema = z.object({
   /** Seconds spent since the previous report; capped to discourage inflated values. */
   timeSpentSeconds: z.number().int().min(0).max(3600).default(0),
   completed: z.boolean().optional(),
+  /** Resume point: seconds into a video, or the zero-based slide index. */
+  position: z.number().int().min(0).max(1_000_000).optional(),
 });
 
 export const knowledgeCheckAnswerSchema = z.object({

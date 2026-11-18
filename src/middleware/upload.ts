@@ -3,7 +3,7 @@ import multer from 'multer';
 import { settingsService } from '../services/settings.service';
 import { AppError, Errors } from '../utils/errors';
 
-type SizeSetting = 'uploads.maxDatasetSizeMb' | 'uploads.maxModelSizeMb';
+type SizeSetting = 'uploads.maxDatasetSizeMb' | 'uploads.maxModelSizeMb' | 'uploads.maxCourseMediaMb';
 
 /**
  * Accepts one multipart file into memory, capped by the size limit from system settings.

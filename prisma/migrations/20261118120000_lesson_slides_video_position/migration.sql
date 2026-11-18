@@ -1,0 +1,8 @@
+-- AlterTable
+ALTER TABLE `lessons` ADD COLUMN `slides` JSON NULL,
+    ADD COLUMN `slidesUrl` TEXT NULL,
+    MODIFY `type` ENUM('TEXT', 'VIDEO', 'SLIDES', 'IMAGE', 'CODE', 'KNOWLEDGE_CHECK', 'EXERCISE') NOT NULL DEFAULT 'TEXT';
+
+-- AlterTable
+ALTER TABLE `progress` ADD COLUMN `lastPosition` INTEGER NOT NULL DEFAULT 0;
+

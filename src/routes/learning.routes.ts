@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { courseController as c, labController as l, quizController as q } from '../controllers/learning.controller';
+import { courseController as c, courseMediaController as media, labController as l, quizController as q } from '../controllers/learning.controller';
 import { authenticate } from '../middleware/authenticate';
+import { singleFileUpload } from '../middleware/upload';
 import { requireAnyPermission, requirePermission } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
 import { PERMISSIONS as P } from '../rbac/permissions';
@@ -35,6 +36,7 @@ export const courseRouter = Router();
 courseRouter.use(authenticate, requirePermission(P.COURSES_READ));
 courseRouter.get('/', validate(listCoursesQuery, 'query'), h(c.list));
 courseRouter.post('/', manage, validate(createCourseSchema), h(c.create));
+courseRouter.post('/media', manage, singleFileUpload('file', 'uploads.maxCourseMediaMb'), h(c.uploadMedia));
 courseRouter.get('/:id', id, h(c.get));
 courseRouter.patch('/:id', manage, id, validate(updateCourseSchema), h(c.update));
 courseRouter.post('/:id/enroll', requirePermission(P.PROGRESS_TRACK), id, h(c.enroll));
@@ -91,3 +93,7 @@ labRouter.post('/:id/attempts', requirePermission(P.LABS_RUN), id, h(l.start));
 export const labAttemptRouter = Router();
 labAttemptRouter.use(authenticate, requirePermission(P.LABS_RUN));
 labAttemptRouter.post('/:id/complete', id, validate(completeLabSchema), h(l.complete));
+
+/** Public by design: <video> and <iframe> cannot send bearer tokens; file names are unguessable UUIDs. */
+export const courseMediaRouter = Router();
+courseMediaRouter.get('/:file', h(media.serve));

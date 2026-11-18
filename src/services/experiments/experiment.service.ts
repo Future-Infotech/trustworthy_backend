@@ -6,6 +6,7 @@ import type { AuthContext } from '../../middleware/authorize';
 import { PERMISSIONS } from '../../rbac/permissions';
 import { sha256, stableStringify } from '../../utils/crypto';
 import { AppError, Errors } from '../../utils/errors';
+import { stringList } from '../../utils/jsonList';
 import { paginate, toSkipTake } from '../../utils/pagination';
 import type { CreateExperimentInput, ListExperimentsQuery } from '../../validators/experiment.validators';
 import { auditService } from '../audit.service';
@@ -224,10 +225,10 @@ export const experimentService = {
         take: 50,
       }),
     ]);
-    const datasetInfo = (d: { id: string; name: string; sensitiveColumns: string[]; columns: { name: string }[] }) => ({
+    const datasetInfo = (d: { id: string; name: string; sensitiveColumns: Prisma.JsonValue; columns: { name: string }[] }) => ({
       id: d.id,
       name: d.name,
-      sensitiveColumns: d.sensitiveColumns,
+      sensitiveColumns: stringList(d.sensitiveColumns),
       columns: d.columns.map((c) => c.name),
     });
     return {

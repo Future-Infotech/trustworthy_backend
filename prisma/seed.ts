@@ -18,7 +18,9 @@ import {
 } from './seed-data/dataset';
 import { AI_SYSTEMS, COMPLIANCE_REQUIREMENTS, IMPACT_ASSESSMENTS, POLICIES, SHADOW_AI } from './seed-data/governance';
 import { ASSIGNMENTS, FINAL_EXAM, LABS, PILLARS_QUIZ, type SeedQuestion } from './seed-data/learning';
+import { loadMechanicalDatasets } from './seed-data/mechanical';
 import { seedRbac } from './seed-data/rbac';
+import { ensureSampleMediaLessons } from './seed-data/sampleMedia';
 
 const prisma = new PrismaClient();
 const DAY = 24 * 60 * 60 * 1000;
@@ -82,7 +84,8 @@ function questionData(q: SeedQuestion, order: number, extra: Partial<Prisma.Ques
 async function seedCourse(users: Record<string, User>) {
   const existing = await prisma.course.findUnique({ where: { slug: COURSE.slug } });
   if (existing) {
-    console.log('  course already present – skipping');
+    const added = await ensureSampleMediaLessons(prisma, existing.id, users['faculty@example.com'].id);
+    console.log(`  course already present – skipping${added ? ` (added ${added} sample video/slide lessons)` : ''}`);
     return existing;
   }
   const faculty = users['faculty@example.com'];
@@ -118,6 +121,8 @@ async function seedCourse(users: Record<string, User>) {
     });
     moduleIds[i + 1] = created.id;
   }
+
+  await ensureSampleMediaLessons(prisma, course.id, faculty.id);
 
   await prisma.quiz.create({
     data: {
@@ -663,6 +668,7 @@ async function main() {
   console.log(`  ${Object.keys(users).length} demo users`);
   await seedCourse(users);
   const ds = await seedDataset(users);
+  await loadMechanicalDatasets(prisma, users['faculty@example.com'].id);
   const datasetId = 'dataset' in ds ? ds.dataset.id : ds.id;
   const genderAudit = 'audit' in ds ? ds.audit.find((a) => a.attribute === 'gender') : undefined;
   await seedGovernance(users, datasetId, genderAudit);

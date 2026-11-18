@@ -6,7 +6,7 @@ import { applyTestEnv, TEST_DATABASE_URL } from './test-env';
 
 /**
  * Recreates the test database schema from migrations and synchronises RBAC.
- * Set SKIP_DB_SETUP=1 to run pure unit tests without PostgreSQL.
+ * Set SKIP_DB_SETUP=1 to run pure unit tests without a database.
  */
 export default async function setup() {
   if (process.env.SKIP_DB_SETUP === '1') return;

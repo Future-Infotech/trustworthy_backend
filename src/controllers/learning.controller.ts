@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { authContext } from '../middleware/authorize';
+import { courseMediaService } from '../services/courseMedia.service';
 import { courseService } from '../services/course.service';
 import { labService } from '../services/lab.service';
 import { quizService } from '../services/quiz.service';
@@ -27,6 +28,7 @@ export const courseController = {
     await courseService.reorderLessons(authContext(req), req.params.id, req.body.ids);
     res.status(204).end();
   },
+  uploadMedia: async (req: Request, res: Response) => res.status(201).json(await courseMediaService.upload(authContext(req), req.file)),
   getLesson: async (req: Request, res: Response) => res.json(await courseService.getLesson(authContext(req), req.params.id)),
   updateLesson: async (req: Request, res: Response) => res.json(await courseService.updateLesson(authContext(req), req.params.id, req.body)),
   deleteLesson: async (req: Request, res: Response) => {
@@ -57,4 +59,45 @@ export const labController = {
   update: async (req: Request, res: Response) => res.json(await labService.update(authContext(req), req.params.id, req.body)),
   start: async (req: Request, res: Response) => res.status(201).json(await labService.startAttempt(authContext(req), req.params.id)),
   complete: async (req: Request, res: Response) => res.json(await labService.complete(authContext(req), req.params.id, req.body)),
+};
+
+const RANGE = /^bytes=(\d*)-(\d*)$/;
+
+/** Streams uploaded lesson media with byte-range support so video can seek and resume. */
+export const courseMediaController = {
+  serve: async (req: Request, res: Response) => {
+    const { body, contentType } = await courseMediaService.read(req.params.file);
+    const total = body.length;
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    // The default API policy forbids framing; PDFs are shown in an iframe on our own origin.
+    res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'self'");
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+
+    const range = req.headers.range ? RANGE.exec(req.headers.range) : null;
+    if (!range || (range[1] === '' && range[2] === '')) {
+      res.setHeader('Content-Length', total);
+      return res.status(200).end(body);
+    }
+    let start: number;
+    let end: number;
+    if (range[1] === '') {
+      // Suffix range: the last N bytes.
+      start = Math.max(0, total - Number(range[2]));
+      end = total - 1;
+    } else {
+      start = Number(range[1]);
+      end = range[2] === '' ? total - 1 : Math.min(Number(range[2]), total - 1);
+    }
+    if (start >= total || start > end) {
+      res.setHeader('Content-Range', `bytes */${total}`);
+      return res.status(416).end();
+    }
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+    res.setHeader('Content-Length', end - start + 1);
+    return res.status(206).end(body.subarray(start, end + 1));
+  },
 };

@@ -5,7 +5,7 @@ Node.js + Express + TypeScript API for the Trustworthy AI platform (JWT auth, RB
 ## Requirements
 
 - Node.js ≥ 18.18
-- PostgreSQL 16
+- MariaDB 11.8 (MySQL 8 compatible)
 - Optional: Redis (shared rate limits), ML service on port 8000
 
 ## Setup

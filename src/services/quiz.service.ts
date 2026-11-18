@@ -4,6 +4,7 @@ import { prisma } from '../config/prisma';
 import type { AuthContext } from '../middleware/authorize';
 import { PERMISSIONS } from '../rbac/permissions';
 import { Errors } from '../utils/errors';
+import { stringList } from '../utils/jsonList';
 import type { QuestionInput, QuizInput } from '../validators/learning.validators';
 import { auditService } from './audit.service';
 
@@ -45,7 +46,7 @@ export function gradeAttempt(questions: Question[], answers: Answers) {
   let maxScore = 0;
   const review = questions.map((q) => {
     const selected = answers[q.id] ?? [];
-    const correct = selected.length > 0 && sameSet(selected, q.correctOptionIds);
+    const correct = selected.length > 0 && sameSet(selected, stringList(q.correctOptionIds));
     maxScore += q.points;
     if (correct) score += q.points;
     return { ...publicQuestion(q), selected, correct, correctOptionIds: q.correctOptionIds, explanation: q.explanation };
@@ -83,7 +84,7 @@ function attemptSummary(a: QuizAttempt) {
 
 /** Finalises an attempt whose time ran out without a submission. */
 async function expireAttempt(a: QuizAttempt, quiz: Quiz) {
-  const questions = await orderedQuestions(a.questionIds);
+  const questions = await orderedQuestions(stringList(a.questionIds));
   const graded = gradeAttempt(questions, {});
   await prisma.quizAttempt.updateMany({
     where: { id: a.id, submittedAt: null },
@@ -200,7 +201,7 @@ export const quizService = {
       include: { quiz: { select: { id: true, title: true, passingScore: true, timeLimitSeconds: true, isFinal: true } } },
     });
     if (!attempt || attempt.userId !== auth.actor.id) throw Errors.notFound('Quiz attempt');
-    const questions = await orderedQuestions(attempt.questionIds);
+    const questions = await orderedQuestions(stringList(attempt.questionIds));
     const base = { ...attemptSummary(attempt), quiz: attempt.quiz, serverTime: new Date().toISOString() };
     if (!attempt.submittedAt) return { ...base, status: 'IN_PROGRESS' as const, questions: questions.map(publicQuestion) };
     const graded = gradeAttempt(questions, (attempt.answers as Answers | null) ?? {});
@@ -213,9 +214,9 @@ export const quizService = {
     if (attempt.submittedAt) throw Errors.conflict('This attempt has already been submitted');
 
     const late = isExpired(attempt);
-    const allowed = new Set(attempt.questionIds);
+    const allowed = new Set(stringList(attempt.questionIds));
     const accepted: Answers = late ? {} : Object.fromEntries(Object.entries(answers).filter(([qid]) => allowed.has(qid)));
-    const questions = await orderedQuestions(attempt.questionIds);
+    const questions = await orderedQuestions(stringList(attempt.questionIds));
     const graded = gradeAttempt(questions, accepted);
     const passed = graded.percentage >= attempt.quiz.passingScore;
 
@@ -274,7 +275,7 @@ export const quizService = {
     if (!before) throw Errors.notFound('Question');
     const merged = { ...before, ...input };
     const ids = new Set((merged.options as { id: string }[]).map((o) => o.id));
-    if (!merged.correctOptionIds.every((c) => ids.has(c))) throw Errors.badRequest('Correct answers must reference existing options');
+    if (!stringList(merged.correctOptionIds).every((c) => ids.has(c))) throw Errors.badRequest('Correct answers must reference existing options');
     const question = await prisma.question.update({ where: { id }, data: { ...input, updatedById: auth.actor.id } });
     await auditService.record({ action: 'question.update', resource: 'question', resourceId: id, actor: auth.actor, context: auth.ctx, before, after: question });
     return question;

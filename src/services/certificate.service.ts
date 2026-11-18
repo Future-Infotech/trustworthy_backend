@@ -7,6 +7,7 @@ import { PERMISSIONS } from '../rbac/permissions';
 import { AppError, Errors } from '../utils/errors';
 import { paginate, toSkipTake } from '../utils/pagination';
 import type { ListCertificatesQuery } from '../validators/certificate.validators';
+import { learnerAssignmentIds } from './assignment.service';
 import { auditService } from './audit.service';
 import { fullName, peopleById, person, userSelect } from './governance/shared';
 import { notificationService } from './notification.service';
@@ -53,6 +54,7 @@ function requirement(key: RequirementKey, label: string, items: RequirementItem[
 
 /** Evaluates the automatic certification requirements from the learner's recorded activity. */
 async function evaluate(userId: string, role: RoleName, courseId: string): Promise<Requirement[]> {
+  const assignmentIds = await learnerAssignmentIds(role, courseId);
   const [lessonTotal, lessonsDone, labs, quizzes, assignments] = await Promise.all([
     prisma.lesson.count({ where: { module: { courseId } } }),
     prisma.progress.count({ where: { userId, status: 'COMPLETED', lesson: { module: { courseId } } } }),
@@ -67,7 +69,7 @@ async function evaluate(userId: string, role: RoleName, courseId: string): Promi
       orderBy: { title: 'asc' },
     }),
     prisma.assignment.findMany({
-      where: { courseId, isPublished: true, OR: [{ targetRoles: { isEmpty: true } }, { targetRoles: { has: role } }] },
+      where: { courseId, isPublished: true, id: { in: assignmentIds } },
       select: { id: true, title: true, maxScore: true, submissions: { where: { userId, status: 'GRADED' }, select: { score: true } } },
       orderBy: { title: 'asc' },
     }),
@@ -274,9 +276,9 @@ export const certificateService = {
     const search = q.search
       ? {
           OR: [
-            { certificateNumber: { contains: q.search, mode: 'insensitive' as const } },
-            { user: { OR: [{ firstName: { contains: q.search, mode: 'insensitive' as const } }, { lastName: { contains: q.search, mode: 'insensitive' as const } }] } },
-            { course: { title: { contains: q.search, mode: 'insensitive' as const } } },
+            { certificateNumber: { contains: q.search } },
+            { user: { OR: [{ firstName: { contains: q.search } }, { lastName: { contains: q.search } }] } },
+            { course: { title: { contains: q.search } } },
           ],
         }
       : {};

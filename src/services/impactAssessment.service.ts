@@ -53,7 +53,7 @@ async function linkedRisk(aiSystemId: string | null) {
   if (!aiSystemId) return null;
   return prisma.riskAssessment.findFirst({
     where: { aiSystemId, status: { not: 'RETIRED' } },
-    orderBy: [{ reviewedAt: { sort: 'desc', nulls: 'last' } }, { updatedAt: 'desc' }],
+    orderBy: [{ reviewedAt: 'desc' }, { updatedAt: 'desc' }],
     select: { id: true, title: true, status: true, score: true, riskLevel: true },
   });
 }
@@ -112,7 +112,7 @@ export const impactAssessmentService = {
       status: q.status,
       aiSystemId: q.aiSystemId,
       ownerId: q.mine ? auth.actor.id : undefined,
-      title: q.search ? { contains: q.search, mode: 'insensitive' } : undefined,
+      title: q.search ? { contains: q.search } : undefined,
     };
     const [rows, total] = await Promise.all([
       prisma.algorithmicImpactAssessment.findMany({ where, include, orderBy: { updatedAt: 'desc' }, ...toSkipTake(q) }),

@@ -26,9 +26,9 @@ export function buildAuditWhere(filter: AuditLogFilter): Prisma.AuditLogWhereInp
   if (filter.result) where.result = filter.result;
   if (filter.search) {
     where.OR = [
-      { userEmail: { contains: filter.search, mode: 'insensitive' } },
-      { action: { contains: filter.search, mode: 'insensitive' } },
-      { reason: { contains: filter.search, mode: 'insensitive' } },
+      { userEmail: { contains: filter.search } },
+      { action: { contains: filter.search } },
+      { reason: { contains: filter.search } },
       { resourceId: { contains: filter.search } },
     ];
   }
